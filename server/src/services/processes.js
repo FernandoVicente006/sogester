@@ -9,6 +9,9 @@ import { audit } from './audit.js';
 import { isApprovedIn } from './forwarders.js';
 import { notifyProcessEvent } from './notifications.js';
 
+/** Prorrogações máximas do prazo de pagamento por compromisso. */
+export const MAX_EXTENSIONS = 2;
+
 export const documentsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../uploads/documents');
 
 /**
@@ -37,7 +40,7 @@ const SELECT = `
          c.is_foreign AS clientIsForeign,
          (pc.id IS NOT NULL) AS hasCommitment,
          (pc.due_at IS NOT NULL AND pc.due_at < NOW()
-            AND p.status NOT IN ('PAGAMENTO_CONFIRMADO', 'CONCLUIDO')) AS paymentOverdue
+            AND p.status NOT IN ('PAGAMENTO_CONFIRMADO', 'CONCLUIDO', 'CANCELADO')) AS paymentOverdue
     FROM processes p
     JOIN entities e ON e.id = p.entity_id
     JOIN forwarders f ON f.id = p.forwarder_id
@@ -208,7 +211,7 @@ export async function listProcesses(actor, { status, q, entityId, forwarderId } 
 
   const order = isForwarder(actor)
     ? 'p.submitted_at DESC, p.id DESC'
-    : "(p.status IN ('CONCLUIDO','REJEITADO')) ASC, p.urgency_requested DESC, p.priority_rank ASC, p.submitted_at ASC, p.id ASC";
+    : "(p.status IN ('CONCLUIDO','REJEITADO','CANCELADO')) ASC, p.urgency_requested DESC, p.priority_rank ASC, p.submitted_at ASC, p.id ASC";
   const rows = await query(`${SELECT} WHERE ${where.join(' AND ')} ORDER BY ${order} LIMIT 200`, params);
   const unread = await unreadByProcess(actor, rows.map((r) => r.id));
   return rows.map((r) => ({ ...mapProcess(r), unreadMessages: unread.get(r.id) ?? 0 }));
@@ -233,12 +236,12 @@ export async function processStats(actor) {
   for (const r of rows) {
     byStatus[r.status] = Number(r.n);
     stats.total += Number(r.n);
-    if (!['CONCLUIDO', 'REJEITADO'].includes(r.status)) {
+    if (!['CONCLUIDO', 'REJEITADO', 'CANCELADO'].includes(r.status)) {
       stats.active += Number(r.n);
       stats.urgent += Number(r.urgent);
       stats.perishable += Number(r.perishable);
     }
-    if (!['PAGAMENTO_CONFIRMADO', 'CONCLUIDO'].includes(r.status)) stats.overdue += Number(r.overdue);
+    if (!['PAGAMENTO_CONFIRMADO', 'CONCLUIDO', 'CANCELADO'].includes(r.status)) stats.overdue += Number(r.overdue);
   }
   const n = (...s) => s.reduce((a, k) => a + (byStatus[k] ?? 0), 0);
   return {
@@ -249,12 +252,13 @@ export async function processStats(actor) {
     awaitingPaymentValidation: n('PAGAMENTO_SUBMETIDO'),
     awaitingPayment: n('PAGAMENTO_PENDENTE'),
     completed: n('CONCLUIDO'),
+    cancelled: n('CANCELADO'),
   };
 }
 
 export async function getProcess(actor, id) {
   const process = mapProcess(await loadAccessible(actor, id));
-  const [documents, history, commitment, authorization, invoice] = await Promise.all([
+  const [documents, history, commitment, authorization, invoice, cancellation, extensions] = await Promise.all([
     query(
       `SELECT id, kind, original_name AS originalName, mime_type AS mimeType, size_bytes AS sizeBytes,
               created_at AS createdAt FROM process_documents WHERE process_id = ? ORDER BY id`,
@@ -266,13 +270,13 @@ export async function getProcess(actor, id) {
       [id],
     ),
     queryOne(
-      `SELECT c.signed_at AS signedAt, c.due_at AS dueAt, c.terms_version AS termsVersion, u.name AS signedBy
+      `SELECT c.signed_at AS signedAt, c.due_at AS dueAt, c.terms_version AS termsVersion, c.extension_count AS extensionCount, u.name AS signedBy
          FROM payment_commitments c JOIN users u ON u.id = c.signed_by WHERE c.process_id = ?`,
       [id],
     ),
     queryOne(
       `SELECT a.code, a.type, a.issued_at AS issuedAt, a.notes, u.name AS issuedBy
-         FROM authorizations a JOIN users u ON u.id = a.issued_by WHERE a.process_id = ?`,
+         FROM authorizations a JOIN users u ON u.id = a.issued_by WHERE a.process_id = ? AND a.revoked_at IS NULL`,
       [id],
     ),
     queryOne(
@@ -283,13 +287,31 @@ export async function getProcess(actor, id) {
          FROM invoices WHERE process_id = ?`,
       [id],
     ),
+    queryOne(
+      `SELECT r.id, r.status, r.reason, r.created_at AS requestedAt, r.decision_notes AS decisionNotes,
+              r.decided_at AS decidedAt, u.name AS requestedBy, d.name AS decidedBy
+         FROM cancellation_requests r
+         JOIN users u ON u.id = r.requested_by
+         LEFT JOIN users d ON d.id = r.decided_by
+        WHERE r.process_id = ? ORDER BY r.id DESC LIMIT 1`,
+      [id],
+    ),
+    query(
+      `SELECT e.days, e.reason, e.new_due_at AS newDueAt, e.created_at AS createdAt, u.name AS extendedBy
+         FROM commitment_extensions e
+         JOIN payment_commitments c ON c.id = e.commitment_id
+         JOIN users u ON u.id = e.extended_by
+        WHERE c.process_id = ? ORDER BY e.id`,
+      [id],
+    ),
   ]);
   return {
     ...process,
     unreadMessages: (await unreadByProcess(actor, [id])).get(id) ?? 0,
     documents,
     history,
-    commitment: commitment ?? null,
+    commitment: commitment ? { ...commitment, extensions, extensionsLeft: Math.max(0, MAX_EXTENSIONS - commitment.extensionCount) } : null,
+    cancellationRequest: cancellation ?? null,
     authorization: authorization ?? null,
     invoice: invoice ? { ...invoice, amount: Number(invoice.amount) } : null,
   };

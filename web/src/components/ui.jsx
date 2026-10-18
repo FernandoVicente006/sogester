@@ -83,6 +83,7 @@ export const PROCESS_STATUS_LABELS = {
   PAGAMENTO_SUBMETIDO: 'Pagamento submetido',
   PAGAMENTO_CONFIRMADO: 'Pagamento confirmado',
   CONCLUIDO: 'Concluído',
+  CANCELADO: 'Cancelado',
 }
 
 export const PRIORITY_LABELS = {

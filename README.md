@@ -22,7 +22,12 @@ Camada digital entre transitários e a Sogester (terminais de Cabinda, Soyo e Lu
   transitários de cada mudança de estado, e todos dos prazos de pagamento (lembrete 24 h antes e alerta de atraso).
   Mensagens do chat agrupam-se numa notificação por destinatário. Configure `SMTP_*`, `MAIL_FROM` e `APP_URL`
   em `server/.env`; sem `SMTP_HOST` ficam só na plataforma.
-- Próximo: relatórios, cancelamento de processos após autorização e integração com o sistema da Sogester.
+- Passo 6: cancelamento e exceções. O transitário cancela de imediato antes da autorização; depois dela pede e a
+  Sogester (administrador ou Faturação) decide. Não se cancela com comprovativo por validar, com pagamento confirmado
+  nem com saída antecipada (a dívida não se apaga). Exceções do administrador: cancelar, revogar autorização
+  (só antes da proforma; o código fica inválido), prorrogar o prazo de pagamento (máx. 2×, até 7 dias, sempre
+  justificado) e reabrir processos rejeitados. Tudo fica no histórico/auditoria e o transitário é notificado.
+- Próximo: relatórios e exportação, e integração com o sistema da Sogester.
 
 Salvaguardas de receita: carga perecível só é autorizada com compromisso assinado (palavra-passe); o prazo
 (`PAYMENT_COMMITMENT_DAYS`, 3 por omissão) conta a partir da autorização; compromissos em atraso bloqueiam novos

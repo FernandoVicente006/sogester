@@ -302,3 +302,5 @@ input[type='file']::file-selector-button:hover { background: var(--brand-100); }
   .topbar { margin-top: 0; position: sticky; top: 0; background: var(--bg); z-index: 30; padding: .5rem 0; }
   .topbar .menu-toggle { position: static; margin: 0 auto 0 0; }
 }
+
+.pbadge-CANCELADO { background: #eef2f7; color: #475569; }

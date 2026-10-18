@@ -75,6 +75,46 @@ const EVENTS = {
     title: (p) => `Processo ${p.reference} concluído`,
     body: () => 'A fatura recibo está disponível para descarregar.',
   },
+  PROCESS_WITHDRAWN: {
+    staff: [LOJA, ADMIN_ENTIDADE],
+    title: (p) => `Processo ${p.reference} cancelado pelo transitário`,
+    body: (p, notes) => `${p.forwarderName}: ${notes}`,
+  },
+  CANCELLATION_REQUESTED: {
+    staff: [ADMIN_ENTIDADE, FATURACAO],
+    title: (p) => `Pedido de cancelamento — ${p.reference}`,
+    body: (p, notes) => `${p.forwarderName}: ${notes}`,
+  },
+  CANCELLATION_APPROVED: {
+    forwarder: true,
+    title: (p) => `Cancelamento aprovado — ${p.reference}`,
+    body: (_p, notes) => notes || 'O processo foi cancelado a seu pedido.',
+  },
+  CANCELLATION_DENIED: {
+    forwarder: true,
+    title: (p) => `Cancelamento recusado — ${p.reference}`,
+    body: (_p, notes) => notes || 'O pedido de cancelamento foi recusado.',
+  },
+  PROCESS_CANCELLED: {
+    forwarder: true,
+    title: (p) => `Processo ${p.reference} cancelado pela Sogester`,
+    body: (_p, notes) => notes || 'O processo foi cancelado.',
+  },
+  AUTHORIZATION_REVOKED: {
+    forwarder: true,
+    title: (p) => `Autorização revogada — ${p.reference}`,
+    body: (_p, notes) => notes || 'A autorização foi revogada e o processo voltou à análise.',
+  },
+  DEADLINE_EXTENDED: {
+    forwarder: true,
+    title: (p) => `Prazo de pagamento prorrogado — ${p.reference}`,
+    body: (_p, notes) => notes || 'A Sogester prorrogou o prazo de pagamento.',
+  },
+  PROCESS_REOPENED: {
+    forwarder: true,
+    title: (p) => `Processo ${p.reference} reaberto`,
+    body: (_p, notes) => notes || 'O processo voltou à análise.',
+  },
   PAYMENT_DUE_SOON: {
     forwarder: true,
     title: (p) => `O prazo de pagamento de ${p.reference} termina em breve`,
@@ -175,7 +215,7 @@ export async function runPaymentChecks() {
                     FROM payment_commitments c
                     JOIN processes p ON p.id = c.process_id
                     JOIN forwarders f ON f.id = p.forwarder_id
-                   WHERE p.status NOT IN ('PAGAMENTO_CONFIRMADO', 'CONCLUIDO') AND c.due_at IS NOT NULL`;
+                   WHERE p.status NOT IN ('PAGAMENTO_CONFIRMADO', 'CONCLUIDO', 'CANCELADO') AND c.due_at IS NOT NULL`;
   const dueSoon = await query(`${select} AND c.due_at > NOW() AND c.due_at <= DATE_ADD(NOW(), INTERVAL 24 HOUR) AND c.reminder_sent_at IS NULL`);
   for (const p of dueSoon) {
     await pool.query('UPDATE payment_commitments SET reminder_sent_at = NOW() WHERE id = ?', [p.commitmentId]);

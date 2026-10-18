@@ -19,10 +19,11 @@ const PRE_AUTHORIZATION = ['SUBMETIDO', 'EM_ANALISE', 'DOCUMENTOS_PENDENTES', 'D
 const AUTHORIZABLE = ['EM_ANALISE', 'DOCUMENTOS_SUBMETIDOS'];
 
 // ---- código de autorização verificável ----------------------------------------------------
-function authorizationCode({ processId, reference, type, issuedAt, commitmentSignature }) {
+function authorizationCode({ processId, reference, type, issuedAt, commitmentSignature, seq = 1 }) {
   const mac = crypto
     .createHmac('sha256', config.authorizationSecret)
-    .update([processId, reference, type, issuedAt.toISOString(), commitmentSignature ?? ''].join('|'))
+    // `seq` só entra a partir da 2.ª autorização do processo (após revogação), mantendo válidos os códigos antigos.
+    .update([processId, reference, type, issuedAt.toISOString(), commitmentSignature ?? '', ...(seq > 1 ? [seq] : [])].join('|'))
     .digest('hex')
     .slice(0, 12)
     .toUpperCase();
@@ -44,7 +45,7 @@ export async function signCommitment(actor, id, { password, accept }, ip) {
   // Salvaguarda de receita: quem tem compromissos em atraso não assina novos.
   const overdue = await queryOne(
     `SELECT COUNT(*) AS n FROM payment_commitments c JOIN processes p ON p.id = c.process_id
-      WHERE p.forwarder_id = ? AND c.due_at < NOW() AND p.status NOT IN ('PAGAMENTO_CONFIRMADO', 'CONCLUIDO')`,
+      WHERE p.forwarder_id = ? AND c.due_at < NOW() AND p.status NOT IN ('PAGAMENTO_CONFIRMADO', 'CONCLUIDO', 'CANCELADO')`,
     [actor.forwarderId],
   );
   if (overdue.n) throw conflict('Existem compromissos em atraso; liquide-os antes de assinar novos', 'OVERDUE_COMMITMENTS');
@@ -93,19 +94,22 @@ export async function issueAuthorization(actor, id, { notes } = {}) {
   const type = perishable ? 'SAIDA_ANTECIPADA' : 'PADRAO';
   const issuedAt = new Date();
   issuedAt.setMilliseconds(0);
+  const { n: previous } = await queryOne('SELECT COUNT(*) AS n FROM authorizations WHERE process_id = ?', [id]);
+  const seq = Number(previous) + 1;
   const code = authorizationCode({
     processId: id,
     reference: process.reference,
     type,
     issuedAt,
     commitmentSignature: commitment?.signature,
+    seq,
   });
 
   await withTransaction(async (conn) => {
     await changeStatus(actor, process, 'AUTORIZACAO_EMITIDA', notes, conn);
     await conn.query(
-      'INSERT INTO authorizations (process_id, type, code, commitment_id, issued_by, issued_at, notes) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [id, type, code, commitment?.id ?? null, actor.id, issuedAt, notes ?? null],
+      'INSERT INTO authorizations (process_id, type, code, commitment_id, issued_by, issued_at, notes, seq) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [id, type, code, commitment?.id ?? null, actor.id, issuedAt, notes ?? null, seq],
     );
     if (commitment) {
       await conn.query('UPDATE payment_commitments SET due_at = DATE_ADD(?, INTERVAL ? DAY) WHERE id = ?', [
@@ -123,7 +127,7 @@ export async function issueAuthorization(actor, id, { notes } = {}) {
 /** Verificação pública do código (para o porto/terceiros): confirma autenticidade sem expor dados do cliente. */
 export async function verifyAuthorization(code) {
   const row = await queryOne(
-    `SELECT a.process_id AS processId, a.type, a.issued_at AS issuedAt, p.reference, p.status,
+    `SELECT a.process_id AS processId, a.type, a.issued_at AS issuedAt, a.seq, a.revoked_at AS revokedAt, p.reference, p.status,
             f.name AS forwarderName, e.name AS entityName, pc.signature_hash AS commitmentSignature
        FROM authorizations a
        JOIN processes p ON p.id = a.process_id
@@ -136,6 +140,7 @@ export async function verifyAuthorization(code) {
   if (!row) return { valid: false };
   const expected = authorizationCode({ ...row, issuedAt: new Date(row.issuedAt) });
   if (expected !== code) return { valid: false };
+  if (row.revokedAt) return { valid: false, revoked: true, reference: row.reference };
   return {
     valid: true,
     reference: row.reference,
@@ -144,6 +149,7 @@ export async function verifyAuthorization(code) {
     entity: row.entityName,
     forwarder: row.forwarderName,
     paymentSettled: ['PAGAMENTO_CONFIRMADO', 'CONCLUIDO'].includes(row.status),
+    cancelled: row.status === 'CANCELADO',
   };
 }
 

@@ -14,6 +14,7 @@ import { ROLES } from '../roles.js';
 import * as auth from '../services/auth.js';
 import * as billing from '../services/billing.js';
 import * as entities from '../services/entities.js';
+import * as exceptions from '../services/exceptions.js';
 import * as forwarders from '../services/forwarders.js';
 import * as messages from '../services/messages.js';
 import * as notifications from '../services/notifications.js';
@@ -116,6 +117,9 @@ const schemas = {
     entityId: id.optional(),
     forwarderId: id.optional(),
   }),
+  reason: z.object({ reason: z.string().trim().min(5, 'Indique o motivo (mín. 5 caracteres)').max(500) }),
+  cancellationDecision: z.object({ approve: z.boolean(), notes: z.string().trim().max(500).optional() }),
+  extendDeadline: z.object({ days: z.number().int().min(1).max(7), reason: z.string().trim().min(5, 'Indique o motivo (mín. 5 caracteres)').max(500) }),
   commitmentSign: z.object({ password: z.string().min(1).max(100), accept: z.boolean() }),
   optionalNotes: z.object({ notes: z.string().trim().max(500).optional() }),
   requiredNotes: z.object({ notes: z.string().trim().min(1, 'Indique o motivo').max(500) }),
@@ -505,6 +509,22 @@ v1.patch('/auth/preferences', authenticate, validate({ body: z.object({ emailNot
   await notifications.setEmailPreference(req.user, req.valid.body.emailNotifications);
   res.json({ emailNotifications: req.valid.body.emailNotifications });
 });
+
+// ---- cancelamento e exceções ----------------------------------------------------------------
+const EXCEPTION_ADMINS = [SUPER_ADMIN, ADMIN_ENTIDADE];
+const process_ = (fn) => async (req, res) => res.json({ process: await fn(req.user, req.valid.params.id, req.valid.body) });
+v1.post('/processes/:id/cancellation', authenticate, requireRole(TRANSITARIO), validate({ params: idParam, body: schemas.reason }), process_(exceptions.cancelOrRequest));
+v1.post(
+  '/processes/:id/cancellation/decision',
+  authenticate,
+  requireRole(SUPER_ADMIN, ADMIN_ENTIDADE, FATURACAO),
+  validate({ params: idParam, body: schemas.cancellationDecision }),
+  process_(exceptions.decideCancellation),
+);
+v1.post('/processes/:id/cancel', authenticate, requireRole(...EXCEPTION_ADMINS), validate({ params: idParam, body: schemas.reason }), process_(exceptions.staffCancel));
+v1.post('/processes/:id/authorization/revoke', authenticate, requireRole(...EXCEPTION_ADMINS), validate({ params: idParam, body: schemas.reason }), process_(exceptions.revokeAuthorization));
+v1.post('/processes/:id/extend-deadline', authenticate, requireRole(...EXCEPTION_ADMINS), validate({ params: idParam, body: schemas.extendDeadline }), process_(exceptions.extendDeadline));
+v1.post('/processes/:id/reopen', authenticate, requireRole(...EXCEPTION_ADMINS), validate({ params: idParam, body: schemas.reason }), process_(exceptions.reopenProcess));
 
 // ---- chat por processo ---------------------------------------------------------------------
 v1.get('/messages/unread', authenticate, async (req, res) => res.json({ total: await messages.unreadTotal(req.user) }));

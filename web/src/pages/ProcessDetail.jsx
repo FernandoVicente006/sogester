@@ -4,7 +4,7 @@ import { api, errorText } from '../api.js'
 import { useAuth } from '../auth.jsx'
 import Chat from '../components/Chat.jsx'
 import Viewer from '../components/Viewer.jsx'
-import { ErrorBox, Field, Icon, PRIORITY_LABELS, PROCESS_STATUS_LABELS, ProcessBadge, formatDate } from '../components/ui.jsx'
+import { ErrorBox, Field, Icon, Modal, PRIORITY_LABELS, PROCESS_STATUS_LABELS, ProcessBadge, formatDate } from '../components/ui.jsx'
 
 // Fases do ciclo de vida para o indicador de progresso (cada fase agrupa vários estados).
 const PHASES = ['Submetido', 'Análise', 'Autorização', 'Pagamento', 'Concluído']
@@ -21,7 +21,7 @@ const PHASE_OF = {
 }
 
 function Stepper({ process: p }) {
-  const rejected = p.status === 'REJEITADO'
+  const rejected = ['REJEITADO', 'CANCELADO'].includes(p.status)
   // Em processos rejeitados, a falha marca a fase em que estava antes da rejeição.
   const before = rejected ? p.history.at(-2)?.toStatus : null
   const current = rejected ? (PHASE_OF[before] ?? 0) : PHASE_OF[p.status]
@@ -69,6 +69,21 @@ const STAFF_ACTIONS = {
 const NOTES_REQUIRED = ['DOCUMENTOS_PENDENTES', 'REJEITADO']
 const REVIEWERS = ['SUPER_ADMIN', 'ADMIN_ENTIDADE', 'LOJA']
 
+const PRE_AUTH = ['SUBMETIDO', 'EM_ANALISE', 'DOCUMENTOS_PENDENTES', 'DOCUMENTOS_SUBMETIDOS']
+const POST_AUTH = ['AUTORIZACAO_EMITIDA', 'PAGAMENTO_PENDENTE', 'PAGAMENTO_SUBMETIDO']
+const ADMINS = ['SUPER_ADMIN', 'ADMIN_ENTIDADE']
+const CANCEL_DECIDERS = ['SUPER_ADMIN', 'ADMIN_ENTIDADE', 'FATURACAO']
+
+// Cada ação com motivo obrigatório: título, rótulo do campo, endpoint e se é destrutiva.
+const DIALOGS = {
+  withdraw: { title: 'Cancelar processo', label: 'Motivo do cancelamento', path: '/cancellation', confirm: 'Cancelar processo', danger: true, hint: 'O processo será cancelado de imediato.' },
+  request: { title: 'Pedir cancelamento', label: 'Motivo do pedido', path: '/cancellation', confirm: 'Enviar pedido', hint: 'A Sogester analisa o pedido e decide. O processo mantém-se até lá.' },
+  staffCancel: { title: 'Cancelar processo', label: 'Motivo do cancelamento', path: '/cancel', confirm: 'Cancelar processo', danger: true, hint: 'O transitário será informado.' },
+  revoke: { title: 'Revogar autorização', label: 'Motivo da revogação', path: '/authorization/revoke', confirm: 'Revogar autorização', danger: true, hint: 'O código deixa de ser válido e o processo volta à análise.' },
+  extend: { title: 'Prorrogar prazo de pagamento', label: 'Justificação', path: '/extend-deadline', confirm: 'Prorrogar', days: true, hint: 'Máximo de 2 prorrogações por compromisso, até 7 dias cada.' },
+  reopen: { title: 'Reabrir processo', label: 'Motivo da reabertura', path: '/reopen', confirm: 'Reabrir', hint: 'O processo volta à análise.' },
+}
+
 export default function ProcessDetail() {
   const { id } = useParams()
   const { user } = useAuth()
@@ -88,6 +103,9 @@ export default function ProcessDetail() {
   }, [])
 
   const [viewing, setViewing] = useState(null)
+  const [dialog, setDialog] = useState(null) // chave de DIALOGS
+  const [dialogReason, setDialogReason] = useState('')
+  const [dialogDays, setDialogDays] = useState(3)
   const [terms, setTerms] = useState(null)
   const [sign, setSign] = useState({ password: '', accept: false })
   const [proforma, setProforma] = useState({ number: '', amount: '', paymentEntity: '', paymentReference: '', file: null })
@@ -113,6 +131,30 @@ export default function ProcessDetail() {
   const actions = REVIEWERS.includes(user.role) ? (STAFF_ACTIONS[p.status] ?? []) : []
   const canAuthorize = AUTHORIZERS.includes(user.role) && ['EM_ANALISE', 'DOCUMENTOS_SUBMETIDOS'].includes(p.status)
   const isBiller = BILLERS.includes(user.role)
+  const earlyRelease = p.authorization?.type === 'SAIDA_ANTECIPADA'
+  const exceptionActions = [
+    (PRE_AUTH.includes(p.status) || POST_AUTH.includes(p.status)) && p.status !== 'PAGAMENTO_SUBMETIDO' && !earlyRelease && ['staffCancel', 'Cancelar processo'],
+    p.status === 'AUTORIZACAO_EMITIDA' && p.authorization?.type === 'PADRAO' && ['revoke', 'Revogar autorização'],
+    p.commitment?.dueAt && p.commitment.extensionsLeft > 0 && !['PAGAMENTO_CONFIRMADO', 'CONCLUIDO', 'CANCELADO'].includes(p.status) && ['extend', 'Prorrogar prazo de pagamento'],
+    p.status === 'REJEITADO' && ['reopen', 'Reabrir processo'],
+  ].filter(Boolean)
+  const openDialog = (key) => {
+    setDialogReason('')
+    setDialogDays(3)
+    setDialog(key)
+  }
+  const submitDialog = (e) => {
+    e.preventDefault()
+    const cfg = DIALOGS[dialog]
+    const body = cfg.days ? { days: Number(dialogDays), reason: dialogReason } : { reason: dialogReason }
+    post(cfg.path, { body })
+    setDialog(null)
+  }
+  const decideCancellation = (approve) => {
+    if (!approve && !notes.trim()) return setError('Indique o motivo para recusar o pedido.')
+    post('/cancellation/decision', { body: { approve, notes: notes.trim() || undefined } })
+    setNotes('')
+  }
   const post = (path, options) => run(() => api('POST', `/processes/${id}${path}`, options))
   const formWith = (data, fileField, file) => {
     const f = new FormData()
@@ -164,8 +206,8 @@ export default function ProcessDetail() {
       </div>
       <Stepper process={p} />
       <ErrorBox message={error} />
-      {p.statusNotes && ['DOCUMENTOS_PENDENTES', 'REJEITADO', 'PAGAMENTO_PENDENTE'].includes(p.status) && (
-        <p className={p.status === 'REJEITADO' ? 'notice danger' : 'notice'}>
+      {p.statusNotes && ['DOCUMENTOS_PENDENTES', 'REJEITADO', 'PAGAMENTO_PENDENTE', 'CANCELADO'].includes(p.status) && (
+        <p className={['REJEITADO', 'CANCELADO'].includes(p.status) ? 'notice danger' : 'notice'}>
           <Icon name="alert" />
           <span>
             <strong>Sogester:</strong> {p.statusNotes}
@@ -248,6 +290,8 @@ export default function ProcessDetail() {
           Compromisso de pagamento assinado por {p.commitment.signedBy} em {formatDate(p.commitment.signedAt)}.
           {p.commitment.dueAt && ` Prazo para liquidar: ${formatDate(p.commitment.dueAt)}.`}
           {p.paymentOverdue && ' PAGAMENTO EM ATRASO.'}
+          {p.commitment.extensions?.length > 0 &&
+            ` Prorrogado ${p.commitment.extensions.length}× (último: +${p.commitment.extensions.at(-1).days} dia(s), ${p.commitment.extensions.at(-1).reason}).`}
         </p>
       )}
 
@@ -403,6 +447,75 @@ export default function ProcessDetail() {
         </section>
       )}
 
+      {isForwarder && !['CONCLUIDO', 'REJEITADO', 'CANCELADO', 'PAGAMENTO_CONFIRMADO'].includes(p.status) && (
+        <section className="card stack">
+          <h3>
+            <Icon name="x" /> Cancelamento
+          </h3>
+          {p.cancellationRequest?.status === 'PENDENTE' ? (
+            <p className="notice">
+              <Icon name="clock" /> Pedido de cancelamento enviado em {formatDate(p.cancellationRequest.requestedAt)}: a aguardar a decisão da Sogester.
+            </p>
+          ) : p.authorization?.type === 'SAIDA_ANTECIPADA' ? (
+            <p className="muted">Carga libertada com compromisso de pagamento: não é possível cancelar. Liquide a proforma dentro do prazo.</p>
+          ) : (
+            <>
+              {p.cancellationRequest?.status === 'RECUSADO' && (
+                <p className="notice">
+                  <Icon name="alert" /> O último pedido foi recusado{p.cancellationRequest.decisionNotes ? ': ' + p.cancellationRequest.decisionNotes : '.'}
+                </p>
+              )}
+              <div>
+                <button className="danger" onClick={() => openDialog(PRE_AUTH.includes(p.status) ? 'withdraw' : 'request')}>
+                  {PRE_AUTH.includes(p.status) ? 'Cancelar processo' : 'Pedir cancelamento'}
+                </button>
+              </div>
+            </>
+          )}
+        </section>
+      )}
+
+      {p.cancellationRequest?.status === 'PENDENTE' && CANCEL_DECIDERS.includes(user.role) && (
+        <section className="card stack">
+          <h3>
+            <Icon name="alert" /> Pedido de cancelamento
+          </h3>
+          <p>
+            <strong>{p.cancellationRequest.requestedBy}</strong> · {formatDate(p.cancellationRequest.requestedAt)}
+            <br />
+            {p.cancellationRequest.reason}
+          </p>
+          {p.status === 'PAGAMENTO_SUBMETIDO' && (
+            <p className="notice">Há um comprovativo por validar: confirme ou recuse o pagamento antes de aprovar o cancelamento.</p>
+          )}
+          <Field label="Motivo / nota (obrigatório para recusar)">
+            <input value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={500} />
+          </Field>
+          <div className="actions-left">
+            <button className="danger" disabled={p.status === 'PAGAMENTO_SUBMETIDO'} onClick={() => decideCancellation(true)}>
+              Aprovar cancelamento
+            </button>
+            <button onClick={() => decideCancellation(false)}>Recusar pedido</button>
+          </div>
+        </section>
+      )}
+
+      {ADMINS.includes(user.role) && exceptionActions.length > 0 && (
+        <section className="card stack">
+          <h3>
+            <Icon name="shield" /> Exceções do administrador
+          </h3>
+          <p className="muted small">Ações excecionais: ficam registadas no histórico e o transitário é notificado.</p>
+          <div className="actions-left">
+            {exceptionActions.map(([key, label]) => (
+              <button key={key} className={DIALOGS[key].danger ? 'danger' : ''} onClick={() => openDialog(key)}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
       <section className="card">
         <h3><Icon name="paperclip" /> Documentos</h3>
         <ul className="docs">
@@ -444,8 +557,35 @@ export default function ProcessDetail() {
 
       </div>
       <div>
-      <Chat processId={p.id} closed={['CONCLUIDO', 'REJEITADO'].includes(p.status)} onRead={() => window.dispatchEvent(new Event('sogester:unread'))} />
+      <Chat processId={p.id} closed={['CONCLUIDO', 'REJEITADO', 'CANCELADO'].includes(p.status)} onRead={() => window.dispatchEvent(new Event('sogester:unread'))} />
       {viewing && <Viewer path={viewing.path} name={viewing.name} onClose={() => setViewing(null)} />}
+      {dialog && (
+        <Modal title={DIALOGS[dialog].title} onClose={() => setDialog(null)}>
+          <form className="stack" onSubmit={submitDialog}>
+            <p className="muted">{DIALOGS[dialog].hint}</p>
+            {DIALOGS[dialog].days && (
+              <Field label="Dias a acrescentar">
+                <select value={dialogDays} onChange={(e) => setDialogDays(e.target.value)}>
+                  {[1, 2, 3, 4, 5, 6, 7].map((d) => (
+                    <option key={d} value={d}>
+                      {d} {d === 1 ? 'dia' : 'dias'}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            )}
+            <Field label={DIALOGS[dialog].label}>
+              <input value={dialogReason} onChange={(e) => setDialogReason(e.target.value)} minLength={5} maxLength={500} required autoFocus />
+            </Field>
+            <div className="actions">
+              <button type="button" onClick={() => setDialog(null)}>
+                Voltar
+              </button>
+              <button className={DIALOGS[dialog].danger ? 'danger' : 'primary'}>{DIALOGS[dialog].confirm}</button>
+            </div>
+          </form>
+        </Modal>
+      )}
 
       <section className="card">
         <h3>

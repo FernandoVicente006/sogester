@@ -36,7 +36,7 @@ export default function Dashboard() {
     Promise.all([api('GET', '/processes/stats'), api('GET', '/processes')])
       .then(([s, p]) => {
         setStats(s.stats)
-        setQueue(p.processes.filter((x) => !['CONCLUIDO', 'REJEITADO'].includes(x.status)).slice(0, 6))
+        setQueue(p.processes.filter((x) => !['CONCLUIDO', 'REJEITADO', 'CANCELADO'].includes(x.status)).slice(0, 6))
       })
       .catch((err) => setError(errorText(err)))
   }, [])

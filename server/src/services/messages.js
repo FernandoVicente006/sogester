@@ -5,7 +5,7 @@ import { audit } from './audit.js';
 import { markMessageNotificationsRead, notifyMessage } from './notifications.js';
 import { documentsDir, loadAccessible, scopeClause } from './processes.js';
 
-const CLOSED = ['CONCLUIDO', 'REJEITADO'];
+const CLOSED = ['CONCLUIDO', 'REJEITADO', 'CANCELADO'];
 const PAGE = 200;
 
 const fixName = (name) => Buffer.from(name, 'latin1').toString('utf8').slice(0, 255); // multer lê o nome como latin1
