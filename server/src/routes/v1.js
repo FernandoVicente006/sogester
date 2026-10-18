@@ -7,7 +7,7 @@ import multer from 'multer';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import { CARGO_PRIORITIES, UPLOADABLE_KINDS, VOLUME_TYPES, cargoCatalog } from '../cargo.js';
-import { badRequest } from '../errors.js';
+import { badRequest, forbidden } from '../errors.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 import { ROLES } from '../roles.js';
@@ -19,6 +19,7 @@ import * as forwarders from '../services/forwarders.js';
 import * as messages from '../services/messages.js';
 import * as notifications from '../services/notifications.js';
 import * as processes from '../services/processes.js';
+import * as reports from '../services/reports.js';
 import * as setup from '../services/setup.js';
 import * as users from '../services/users.js';
 
@@ -525,6 +526,43 @@ v1.post('/processes/:id/cancel', authenticate, requireRole(...EXCEPTION_ADMINS),
 v1.post('/processes/:id/authorization/revoke', authenticate, requireRole(...EXCEPTION_ADMINS), validate({ params: idParam, body: schemas.reason }), process_(exceptions.revokeAuthorization));
 v1.post('/processes/:id/extend-deadline', authenticate, requireRole(...EXCEPTION_ADMINS), validate({ params: idParam, body: schemas.extendDeadline }), process_(exceptions.extendDeadline));
 v1.post('/processes/:id/reopen', authenticate, requireRole(...EXCEPTION_ADMINS), validate({ params: idParam, body: schemas.reason }), process_(exceptions.reopenProcess));
+
+// ---- relatórios ------------------------------------------------------------------------------
+const REPORT_ROLES = {
+  processes: [SUPER_ADMIN, ADMIN_ENTIDADE, LOJA, CADASTRO, FATURACAO],
+  revenue: [SUPER_ADMIN, ADMIN_ENTIDADE, FATURACAO],
+  overdue: [SUPER_ADMIN, ADMIN_ENTIDADE, FATURACAO],
+}
+const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use o formato AAAA-MM-DD').refine((d) => !Number.isNaN(Date.parse(d)), 'Data inválida')
+const reportQuery = z.object({
+  from: date.optional(),
+  to: date.optional(),
+  status: z.enum(Object.keys(reports.STATUS_LABELS)).optional(),
+  priority: z.enum(Object.keys(CARGO_PRIORITIES)).optional(),
+  forwarderId: id.optional(),
+  entityId: id.optional(),
+  minHours: z.coerce.number().int().min(0).max(720).optional(),
+  kind: z.enum(['payments', 'stalled']).optional(),
+  format: z.enum(['json', 'csv']).optional(),
+})
+v1.get(
+  '/reports/:name',
+  authenticate,
+  validate({ params: z.object({ name: z.enum(['processes', 'revenue', 'overdue']) }), query: reportQuery }),
+  async (req, res) => {
+    const { name } = req.valid.params
+    if (!REPORT_ROLES[name].includes(req.user.role)) throw forbidden()
+    const { format, ...filters } = req.valid.query
+    if (format === 'csv') {
+      const { csv, filename } = await reports.runReport(req.user, name, filters, { csv: true })
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8')
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`)
+      res.setHeader('Cache-Control', 'private, no-store')
+      return res.send(csv)
+    }
+    res.json({ report: await reports.runReport(req.user, name, filters) })
+  },
+)
 
 // ---- chat por processo ---------------------------------------------------------------------
 v1.get('/messages/unread', authenticate, async (req, res) => res.json({ total: await messages.unreadTotal(req.user) }));

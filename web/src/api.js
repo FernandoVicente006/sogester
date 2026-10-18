@@ -62,3 +62,21 @@ export async function fetchBlob(path) {
   if (!res.ok) throw new ApiError(res.status, 'ERROR', 'Não foi possível abrir o ficheiro')
   return res.blob()
 }
+
+/** Descarrega um ficheiro gerado pela API (ex.: CSV) com o nome sugerido pelo servidor. */
+export async function downloadFile(path, fallbackName = 'relatorio.csv') {
+  const res = await fetch(`/api/v1${path}`, { headers: { Authorization: `Bearer ${getToken()}` } })
+  if (!res.ok) {
+    const data = await res.json().catch(() => null)
+    throw new ApiError(res.status, data?.error?.code ?? 'ERROR', data?.error?.message ?? 'Não foi possível exportar')
+  }
+  const name = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') ?? '')?.[1] ?? fallbackName
+  const url = URL.createObjectURL(await res.blob())
+  const a = document.createElement('a')
+  a.href = url
+  a.download = name
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 10_000)
+}

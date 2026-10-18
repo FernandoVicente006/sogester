@@ -27,7 +27,11 @@ Camada digital entre transitários e a Sogester (terminais de Cabinda, Soyo e Lu
   nem com saída antecipada (a dívida não se apaga). Exceções do administrador: cancelar, revogar autorização
   (só antes da proforma; o código fica inválido), prorrogar o prazo de pagamento (máx. 2×, até 7 dias, sempre
   justificado) e reabrir processos rejeitados. Tudo fica no histórico/auditoria e o transitário é notificado.
-- Próximo: relatórios e exportação, e integração com o sistema da Sogester.
+- Passo 7: relatórios (/relatorios) com exportação CSV e impressão/PDF. Processos (estados, prioridades, tempos
+  médios até autorizar e concluir; todo o pessoal), Receita (faturado, cobrado e em aberto por mês e transitário) e
+  Atrasos (pagamentos vencidos e processos parados, com quem tem de agir; só administrador e Faturação). O CSV usa
+  ";" e vírgula decimal (Excel PT), protege contra injeção de fórmulas e cada exportação fica auditada.
+- Próximo: integração com o sistema da Sogester e preparação para produção.
 
 Salvaguardas de receita: carga perecível só é autorizada com compromisso assinado (palavra-passe); o prazo
 (`PAYMENT_COMMITMENT_DAYS`, 3 por omissão) conta a partir da autorização; compromissos em atraso bloqueiam novos

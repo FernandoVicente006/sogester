@@ -64,6 +64,11 @@ export default function Layout() {
               </span>
             )}
           </NavLink>
+          {user.role !== 'TRANSITARIO' && (
+            <NavLink to="/relatorios">
+              <Icon name="chart" /> Relatórios
+            </NavLink>
+          )}
           <NavLink to="/transitarios">
             <Icon name="truck" /> {user.role === 'TRANSITARIO' ? 'O meu perfil' : 'Transitários'}
           </NavLink>
