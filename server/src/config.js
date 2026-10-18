@@ -17,6 +17,10 @@ export const config = {
   jwtExpiresIn: process.env.JWT_EXPIRES_IN ?? '8h',
   // Token exigido para inicializar o administrador de cada entidade. Vazio = endpoint desativado.
   setupToken: process.env.SETUP_TOKEN ?? (isProd ? '' : 'dev-setup-token'),
+  // Chave que assina os códigos de autorização digital (independente do JWT para poder rodar este sem invalidar autorizações).
+  authorizationSecret: required('AUTHORIZATION_SECRET', 'dev-only-authorization-secret'),
+  // Dias que o transitário tem para liquidar após uma saída antecipada (carga perecível).
+  commitmentDays: Number(process.env.PAYMENT_COMMITMENT_DAYS ?? 3),
   corsOrigin: process.env.CORS_ORIGIN ?? 'http://localhost:5173',
   db: {
     host: process.env.DB_HOST ?? 'localhost',

@@ -83,6 +83,7 @@ export default function Processes() {
               {!isForwarder && <td>{p.forwarderName}</td>}
               <td>{p.client.name}</td>
               <td>
+                {p.paymentOverdue && <span className="tag urgent">Pagamento em atraso</span>}
                 {p.urgencyRequested && <span className="tag urgent">Urgente</span>}
                 <span className={`tag prio-${p.cargoPriority}`}>{PRIORITY_LABELS[p.cargoPriority]}</span>
               </td>

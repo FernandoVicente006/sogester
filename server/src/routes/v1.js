@@ -6,12 +6,13 @@ import { Router } from 'express';
 import multer from 'multer';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
-import { CARGO_PRIORITIES, DOCUMENT_KINDS, VOLUME_TYPES, cargoCatalog } from '../cargo.js';
+import { CARGO_PRIORITIES, UPLOADABLE_KINDS, VOLUME_TYPES, cargoCatalog } from '../cargo.js';
 import { badRequest } from '../errors.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 import { ROLES } from '../roles.js';
 import * as auth from '../services/auth.js';
+import * as billing from '../services/billing.js';
 import * as entities from '../services/entities.js';
 import * as forwarders from '../services/forwarders.js';
 import * as processes from '../services/processes.js';
@@ -21,6 +22,7 @@ import * as users from '../services/users.js';
 export const uploadsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../uploads');
 
 const { SUPER_ADMIN, ADMIN_ENTIDADE, CADASTRO, LOJA, FATURACAO, TRANSITARIO } = ROLES;
+
 const MANAGE_FORWARDERS = [SUPER_ADMIN, ADMIN_ENTIDADE, CADASTRO];
 
 // ---- schemas -------------------------------------------------------------------------------
@@ -112,6 +114,18 @@ const schemas = {
     entityId: id.optional(),
     forwarderId: id.optional(),
   }),
+  commitmentSign: z.object({ password: z.string().min(1).max(100), accept: z.boolean() }),
+  optionalNotes: z.object({ notes: z.string().trim().max(500).optional() }),
+  requiredNotes: z.object({ notes: z.string().trim().min(1, 'Indique o motivo').max(500) }),
+  proforma: z.object({
+    number: text(40),
+    amount: z.number().positive().max(1e12),
+    currency: z.string().trim().toUpperCase().length(3).optional(),
+    paymentEntity: text(40),
+    paymentReference: text(60),
+  }),
+  receipt: z.object({ number: text(40) }),
+  authorizationCode: z.object({ code: z.string().regex(/^AUT-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}$/i).transform((c) => c.toUpperCase()) }),
   processTransition: z.object({
     status: z.enum(['EM_ANALISE', 'DOCUMENTOS_PENDENTES', 'REJEITADO']),
     notes: z.string().trim().max(500).optional(),
@@ -338,7 +352,7 @@ v1.post(
     const files = req.file ? [{ file: req.file }] : [];
     try {
       const kind = String(req.body?.kind ?? '');
-      if (!req.file || !Object.hasOwn(DOCUMENT_KINDS, kind)) {
+      if (!req.file || !UPLOADABLE_KINDS.includes(kind)) {
         throw badRequest('Indique "kind" válido e o ficheiro "file"', 'VALIDATION_ERROR');
       }
       res.status(201).json({ process: await processes.addDocument(req.user, req.valid.params.id, kind, req.file) });
@@ -369,4 +383,113 @@ v1.get(
       },
     });
   },
+);
+
+// ---- autorização digital e faturação -------------------------------------------------------
+const AUTHORIZERS = [SUPER_ADMIN, ADMIN_ENTIDADE, LOJA];
+const BILLERS = [SUPER_ADMIN, ADMIN_ENTIDADE, FATURACAO];
+
+/** Lê o JSON do campo multipart "data" e valida-o; apaga os ficheiros enviados se algo falhar. */
+function withUpload(fileField, schema, handler) {
+  return [
+    docUpload.single(fileField),
+    async (req, res) => {
+      const files = req.file ? [{ file: req.file }] : [];
+      try {
+        if (!req.file) throw badRequest(`Ficheiro "${fileField}" em falta`, 'FILE_REQUIRED');
+        let data = {};
+        if (schema) {
+          let rawData;
+          try {
+            rawData = JSON.parse(req.body?.data ?? '');
+          } catch {
+            throw badRequest('Campo "data" deve ser JSON', 'BAD_JSON');
+          }
+          const parsed = schema.safeParse(rawData);
+          if (!parsed.success) {
+            const details = parsed.error.issues.map((i) => ({ field: i.path.join('.'), message: i.message }));
+            throw badRequest('Dados inválidos', 'VALIDATION_ERROR', details);
+          }
+          data = parsed.data;
+        }
+        res.json({ process: await handler(req, data) });
+      } catch (err) {
+        await removeUploaded(files);
+        throw err;
+      }
+    },
+  ];
+}
+
+v1.get('/processes/:id/commitment-terms', authenticate, requireRole(TRANSITARIO), validate({ params: idParam }), async (req, res) =>
+  res.json(await billing.getCommitmentTerms(req.user, req.valid.params.id)),
+);
+v1.post(
+  '/processes/:id/commitment',
+  authenticate,
+  requireRole(TRANSITARIO),
+  validate({ params: idParam, body: schemas.commitmentSign }),
+  async (req, res) =>
+    res.status(201).json({ process: await billing.signCommitment(req.user, req.valid.params.id, req.valid.body, req.ip) }),
+);
+v1.post(
+  '/processes/:id/authorization',
+  authenticate,
+  requireRole(...AUTHORIZERS),
+  validate({ params: idParam, body: schemas.optionalNotes }),
+  async (req, res) =>
+    res.status(201).json({ process: await billing.issueAuthorization(req.user, req.valid.params.id, req.valid.body) }),
+);
+v1.post(
+  '/processes/:id/proforma',
+  authenticate,
+  requireRole(...BILLERS),
+  validate({ params: idParam }),
+  ...withUpload('proforma', schemas.proforma, (req, data) =>
+    billing.issueProforma(req.user, req.valid.params.id, data, req.file),
+  ),
+);
+v1.post(
+  '/processes/:id/payment-proof',
+  authenticate,
+  requireRole(TRANSITARIO),
+  validate({ params: idParam }),
+  ...withUpload('proof', null, (req) => billing.submitPaymentProof(req.user, req.valid.params.id, req.file)),
+);
+v1.post(
+  '/processes/:id/confirm-payment',
+  authenticate,
+  requireRole(...BILLERS),
+  validate({ params: idParam, body: schemas.optionalNotes }),
+  async (req, res) =>
+    res.json({ process: await billing.confirmPayment(req.user, req.valid.params.id, req.valid.body) }),
+);
+v1.post(
+  '/processes/:id/reject-payment',
+  authenticate,
+  requireRole(...BILLERS),
+  validate({ params: idParam, body: schemas.requiredNotes }),
+  async (req, res) =>
+    res.json({ process: await billing.rejectPayment(req.user, req.valid.params.id, req.valid.body) }),
+);
+v1.post(
+  '/processes/:id/receipt',
+  authenticate,
+  requireRole(...BILLERS),
+  validate({ params: idParam }),
+  ...withUpload('receipt', schemas.receipt, (req, data) =>
+    billing.issueReceipt(req.user, req.valid.params.id, data, req.file),
+  ),
+);
+
+// Verificação pública de um código de autorização (sem dados do cliente)
+const verifyLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: process.env.NODE_ENV === 'test' ? 1000 : 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: { code: 'TOO_MANY_REQUESTS', message: 'Demasiados pedidos; tente mais tarde' } },
+});
+v1.get('/verify/authorization/:code', verifyLimiter, validate({ params: schemas.authorizationCode }), async (req, res) =>
+  res.json(await billing.verifyAuthorization(req.valid.params.code)),
 );

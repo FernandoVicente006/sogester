@@ -10,6 +10,7 @@ import Entities from './pages/Entities.jsx'
 import Processes from './pages/Processes.jsx'
 import NewProcess from './pages/NewProcess.jsx'
 import ProcessDetail from './pages/ProcessDetail.jsx'
+import Verify from './pages/Verify.jsx'
 
 /** Página inicial: a fila de processos (cada perfil já vê só o que lhe cabe). */
 const Home = () => <Navigate to="/processos" replace />
@@ -27,6 +28,7 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/setup" element={<Setup />} />
+      <Route path="/verificar/:code" element={<Verify />} />
       <Route
         element={
           <Protected>

@@ -8,8 +8,15 @@ Camada digital entre transitários e a Sogester (terminais de Cabinda, Soyo e Lu
 - Passo 1: entidades/terminais, perfis de acesso e registo de transitários.
 - Passo 2: submissão de processos (cliente, carga, documentos), fila por prioridade, análise pela Loja
   (SUBMETIDO → EM_ANALISE → DOCUMENTOS_PENDENTES/REJEITADO) e histórico de estados.
-- Próximo: autorização digital e faturação (AUTORIZACAO_EMITIDA → … → CONCLUIDO), chat, compromisso de pagamento
-  para perecíveis.
+- Passo 3: autorização digital (código assinado com HMAC, verificável em `/verificar/:código`), compromisso de
+  pagamento para perecíveis (saída antecipada) e faturação manual: proforma → comprovativo → confirmação → fatura
+  recibo (AUTORIZACAO_EMITIDA → … → CONCLUIDO).
+- Próximo: chat por processo e notificações.
+
+Salvaguardas de receita: carga perecível só é autorizada com compromisso assinado (palavra-passe); o prazo
+(`PAYMENT_COMMITMENT_DAYS`, 3 por omissão) conta a partir da autorização; compromissos em atraso bloqueiam novos
+compromissos do mesmo transitário. Pressupostos a confirmar com a Sogester: papéis que emitem a autorização (Loja e
+administrador) e a proforma/recibo (Faturação e administrador), e a ordem da fila.
 
 Fila (staff): urgência pedida → prioridade da carga (perecível, perigosa, descarga direta, restantes) → chegada.
 Esta ordem é um pressuposto a confirmar com a Sogester (ver "Pontos em aberto" no Notion).

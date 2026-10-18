@@ -67,7 +67,13 @@ export const DOCUMENT_KINDS = {
   EP17: 'EP17 (retirada de carga)',
   EP15: 'EP15 (embarque de carga)',
   OUTRO: 'Outro',
+  PROFORMA: 'Fatura proforma',
+  COMPROVATIVO: 'Comprovativo de pagamento',
+  FATURA_RECIBO: 'Fatura recibo',
 };
+
+/** Tipos que o transitário pode anexar livremente; os de faturação só entram pelos seus próprios passos. */
+export const UPLOADABLE_KINDS = ['BILHETE', 'ALVARA', 'GUIA_CABOTAGEM', 'BL', 'EP17', 'EP15', 'OUTRO'];
 
 export function cargoCatalog() {
   return {

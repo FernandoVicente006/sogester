@@ -32,11 +32,15 @@ const SELECT = `
          p.container_volume AS containerVolume, p.container_weight_kg AS containerWeightKg,
          p.submitted_at AS submittedAt, p.updated_at AS updatedAt,
          c.id AS clientId, c.type AS clientType, c.name AS clientName, c.document_number AS clientDocument,
-         c.is_foreign AS clientIsForeign
+         c.is_foreign AS clientIsForeign,
+         (pc.id IS NOT NULL) AS hasCommitment,
+         (pc.due_at IS NOT NULL AND pc.due_at < NOW()
+            AND p.status NOT IN ('PAGAMENTO_CONFIRMADO', 'CONCLUIDO')) AS paymentOverdue
     FROM processes p
     JOIN entities e ON e.id = p.entity_id
     JOIN forwarders f ON f.id = p.forwarder_id
-    JOIN clients c ON c.id = p.client_id`;
+    JOIN clients c ON c.id = p.client_id
+    LEFT JOIN payment_commitments pc ON pc.process_id = p.id`;
 
 const num = (v) => (v === null || v === undefined ? null : Number(v));
 
@@ -45,6 +49,8 @@ function mapProcess(r) {
   return {
     ...p,
     urgencyRequested: !!p.urgencyRequested,
+    hasCommitment: !!p.hasCommitment,
+    paymentOverdue: !!p.paymentOverdue,
     quantity: num(p.quantity),
     weightKg: num(p.weightKg),
     containerVolume: num(p.containerVolume),
@@ -60,7 +66,7 @@ function scopeClause(actor) {
   return { sql: 'p.entity_id = ?', params: [actor.entityId] };
 }
 
-async function loadAccessible(actor, id) {
+export async function loadAccessible(actor, id) {
   const scope = scopeClause(actor);
   const row = await queryOne(`${SELECT} WHERE p.id = ? AND ${scope.sql}`, [id, ...scope.params]);
   if (!row) throw notFound('Processo não encontrado');
@@ -161,7 +167,7 @@ export async function createProcess(actor, input, files) {
   return getProcess(actor, id);
 }
 
-async function insertDocument(conn, processId, kind, file, userId) {
+export async function insertDocument(conn, processId, kind, file, userId) {
   await conn.query(
     `INSERT INTO process_documents (process_id, kind, original_name, stored_name, mime_type, size_bytes, uploaded_by)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -191,7 +197,7 @@ export async function listProcesses(actor, { status, q, entityId, forwarderId } 
 
 export async function getProcess(actor, id) {
   const process = mapProcess(await loadAccessible(actor, id));
-  const [documents, history] = await Promise.all([
+  const [documents, history, commitment, authorization, invoice] = await Promise.all([
     query(
       `SELECT id, kind, original_name AS originalName, mime_type AS mimeType, size_bytes AS sizeBytes,
               created_at AS createdAt FROM process_documents WHERE process_id = ? ORDER BY id`,
@@ -202,12 +208,44 @@ export async function getProcess(actor, id) {
          FROM process_status_history h JOIN users u ON u.id = h.changed_by WHERE h.process_id = ? ORDER BY h.id`,
       [id],
     ),
+    queryOne(
+      `SELECT c.signed_at AS signedAt, c.due_at AS dueAt, c.terms_version AS termsVersion, u.name AS signedBy
+         FROM payment_commitments c JOIN users u ON u.id = c.signed_by WHERE c.process_id = ?`,
+      [id],
+    ),
+    queryOne(
+      `SELECT a.code, a.type, a.issued_at AS issuedAt, a.notes, u.name AS issuedBy
+         FROM authorizations a JOIN users u ON u.id = a.issued_by WHERE a.process_id = ?`,
+      [id],
+    ),
+    queryOne(
+      `SELECT proforma_number AS proformaNumber, amount, currency, payment_entity AS paymentEntity,
+              payment_reference AS paymentReference, proforma_issued_at AS proformaIssuedAt,
+              proof_submitted_at AS proofSubmittedAt, payment_confirmed_at AS paymentConfirmedAt,
+              receipt_number AS receiptNumber, receipt_issued_at AS receiptIssuedAt
+         FROM invoices WHERE process_id = ?`,
+      [id],
+    ),
   ]);
-  return { ...process, documents, history };
+  return {
+    ...process,
+    documents,
+    history,
+    commitment: commitment ?? null,
+    authorization: authorization ?? null,
+    invoice: invoice ? { ...invoice, amount: Number(invoice.amount) } : null,
+  };
 }
 
-async function changeStatus(actor, process, toStatus, notes, conn = pool) {
-  await conn.query('UPDATE processes SET status = ?, status_notes = ? WHERE id = ?', [toStatus, notes ?? null, process.id]);
+/** Muda o estado só se ainda for o que o ator viu (evita duas ações concorrentes sobre o mesmo processo). */
+export async function changeStatus(actor, process, toStatus, notes, conn = pool) {
+  const [res] = await conn.query('UPDATE processes SET status = ?, status_notes = ? WHERE id = ? AND status = ?', [
+    toStatus,
+    notes ?? null,
+    process.id,
+    process.status,
+  ]);
+  if (!res.affectedRows) throw conflict('O processo foi alterado entretanto; atualize a página', 'STALE_STATE');
   await conn.query(
     'INSERT INTO process_status_history (process_id, from_status, to_status, changed_by, notes) VALUES (?, ?, ?, ?, ?)',
     [process.id, process.status, toStatus, actor.id, notes ?? null],
