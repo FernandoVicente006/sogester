@@ -1,10 +1,12 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Router } from 'express';
 import multer from 'multer';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
+import { CARGO_PRIORITIES, DOCUMENT_KINDS, VOLUME_TYPES, cargoCatalog } from '../cargo.js';
 import { badRequest } from '../errors.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
@@ -12,6 +14,7 @@ import { ROLES } from '../roles.js';
 import * as auth from '../services/auth.js';
 import * as entities from '../services/entities.js';
 import * as forwarders from '../services/forwarders.js';
+import * as processes from '../services/processes.js';
 import * as setup from '../services/setup.js';
 import * as users from '../services/users.js';
 
@@ -73,7 +76,70 @@ const schemas = {
     status: z.enum(['PENDENTE', 'APROVADO', 'REJEITADO', 'SUSPENSO']),
     notes: z.string().trim().max(500).optional(),
   }),
+  processCreate: z.object({
+    entityId: id,
+    client: z.object({
+      type: z.enum(['SINGULAR', 'EMPRESA']),
+      name: text(160),
+      documentNumber: text(40),
+      isForeign: z.boolean().optional(),
+      phone: z.string().trim().max(40).optional(),
+      email: email.optional(),
+      address: z.string().trim().max(255).optional(),
+    }),
+    cargoPriority: z.enum(Object.keys(CARGO_PRIORITIES)),
+    volumeType: z.enum(Object.keys(VOLUME_TYPES)),
+    cargoCategory: text(100).optional(),
+    description: z.string().trim().min(1).max(1000).optional(),
+    quantity: z.number().positive().max(1e9).optional(),
+    weightKg: z.number().positive().max(1e9).optional(),
+    vehicleBrand: text(80).optional(),
+    vehicleModel: text(80).optional(),
+    container: z
+      .object({
+        plate: text(30),
+        type: text(60),
+        volume: z.number().positive().max(1e6),
+        weightKg: z.number().positive().max(1e9),
+      })
+      .optional(),
+    urgencyRequested: z.boolean().optional(),
+    urgencyReason: z.string().trim().max(500).optional(),
+  }),
+  processList: z.object({
+    status: z.string().trim().max(30).optional(),
+    q: z.string().trim().max(100).optional(),
+    entityId: id.optional(),
+    forwarderId: id.optional(),
+  }),
+  processTransition: z.object({
+    status: z.enum(['EM_ANALISE', 'DOCUMENTOS_PENDENTES', 'REJEITADO']),
+    notes: z.string().trim().max(500).optional(),
+  }),
 };
+
+// ---- upload de documentos de processos (privados) ------------------------------------------
+const DOC_TYPES = { 'application/pdf': '.pdf', 'image/png': '.png', 'image/jpeg': '.jpg' };
+const DOC_FIELDS = {
+  bilhete: 'BILHETE',
+  alvara: 'ALVARA',
+  guiaCabotagem: 'GUIA_CABOTAGEM',
+  bl: 'BL',
+  ep17: 'EP17',
+  ep15: 'EP15',
+  outros: 'OUTRO',
+};
+fs.mkdirSync(processes.documentsDir, { recursive: true });
+const docUpload = multer({
+  storage: multer.diskStorage({
+    destination: processes.documentsDir,
+    filename: (_req, file, cb) => cb(null, `${crypto.randomUUID()}${DOC_TYPES[file.mimetype]}`),
+  }),
+  limits: { fileSize: 10 * 1024 * 1024, files: 12 },
+  fileFilter: (_req, file, cb) =>
+    DOC_TYPES[file.mimetype] ? cb(null, true) : cb(badRequest('Documentos devem ser PDF, PNG ou JPG', 'INVALID_FILE_TYPE')),
+});
+const removeUploaded = (files) => processes.removeFiles(files).catch(() => {});
 
 // ---- upload de logótipo --------------------------------------------------------------------
 const LOGO_TYPES = { 'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp' };
@@ -204,5 +270,103 @@ v1.post(
   async (req, res) => {
     if (!req.file) throw badRequest('Ficheiro "logo" em falta', 'FILE_REQUIRED');
     res.json({ forwarder: await forwarders.setLogo(req.user, req.valid.params.id, req.file) });
+  },
+);
+
+// Catálogo de carga (prioridades, tipos de volume, categorias, documentos)
+v1.get('/meta/cargo', authenticate, (_req, res) => res.json(cargoCatalog()));
+
+// Clientes do transitário (autocompletar na submissão)
+v1.get('/clients', authenticate, requireRole(TRANSITARIO), async (req, res) => {
+  res.json({ clients: await processes.listClients(req.user, { q: String(req.query.q ?? '').slice(0, 100) || undefined }) });
+});
+
+// Processos
+v1.post(
+  '/processes',
+  authenticate,
+  requireRole(TRANSITARIO),
+  docUpload.fields(Object.entries(DOC_FIELDS).map(([name]) => ({ name, maxCount: name === 'outros' ? 5 : 1 }))),
+  async (req, res) => {
+    const files = Object.entries(req.files ?? {}).flatMap(([field, list]) => list.map((file) => ({ kind: DOC_FIELDS[field], file })));
+    try {
+      let raw;
+      try {
+        raw = JSON.parse(req.body?.data ?? '');
+      } catch {
+        throw badRequest('Campo "data" deve ser JSON', 'BAD_JSON');
+      }
+      const parsed = schemas.processCreate.safeParse(raw);
+      if (!parsed.success) {
+        const details = parsed.error.issues.map((i) => ({ field: i.path.join('.'), message: i.message }));
+        throw badRequest('Dados inválidos', 'VALIDATION_ERROR', details);
+      }
+      res.status(201).json({ process: await processes.createProcess(req.user, parsed.data, files) });
+    } catch (err) {
+      await removeUploaded(files);
+      throw err;
+    }
+  },
+);
+v1.get(
+  '/processes',
+  authenticate,
+  validate({ query: schemas.processList }),
+  async (req, res) => res.json({ processes: await processes.listProcesses(req.user, req.valid.query) }),
+);
+v1.get(
+  '/processes/:id',
+  authenticate,
+  validate({ params: idParam }),
+  async (req, res) => res.json({ process: await processes.getProcess(req.user, req.valid.params.id) }),
+);
+v1.post(
+  '/processes/:id/transition',
+  authenticate,
+  requireRole(SUPER_ADMIN, ADMIN_ENTIDADE, LOJA),
+  validate({ params: idParam, body: schemas.processTransition }),
+  async (req, res) =>
+    res.json({ process: await processes.transition(req.user, req.valid.params.id, req.valid.body) }),
+);
+v1.post(
+  '/processes/:id/documents',
+  authenticate,
+  requireRole(TRANSITARIO),
+  validate({ params: idParam }),
+  docUpload.single('file'),
+  async (req, res) => {
+    const files = req.file ? [{ file: req.file }] : [];
+    try {
+      const kind = String(req.body?.kind ?? '');
+      if (!req.file || !Object.hasOwn(DOCUMENT_KINDS, kind)) {
+        throw badRequest('Indique "kind" válido e o ficheiro "file"', 'VALIDATION_ERROR');
+      }
+      res.status(201).json({ process: await processes.addDocument(req.user, req.valid.params.id, kind, req.file) });
+    } catch (err) {
+      await removeUploaded(files);
+      throw err;
+    }
+  },
+);
+v1.post(
+  '/processes/:id/submit-documents',
+  authenticate,
+  requireRole(TRANSITARIO),
+  validate({ params: idParam }),
+  async (req, res) => res.json({ process: await processes.submitDocuments(req.user, req.valid.params.id) }),
+);
+v1.get(
+  '/processes/:id/documents/:docId',
+  authenticate,
+  validate({ params: z.object({ id, docId: id }) }),
+  async (req, res) => {
+    const doc = await processes.getDocumentFile(req.user, req.valid.params.id, req.valid.params.docId);
+    res.sendFile(doc.absolutePath, {
+      headers: {
+        'Content-Type': doc.mimeType,
+        'Content-Disposition': `inline; filename*=UTF-8''${encodeURIComponent(doc.originalName)}`,
+        'Cache-Control': 'private, no-store',
+      },
+    });
   },
 );

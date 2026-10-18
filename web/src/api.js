@@ -36,6 +36,21 @@ export async function api(method, path, { body, headers, form } = {}) {
   return data
 }
 
+/** Abre um documento privado: o pedido leva o token, por isso passa por blob em vez de link direto. */
+export async function openDocument(path) {
+  const win = window.open('', '_blank')
+  try {
+    const res = await fetch(`/api/v1${path}`, { headers: { Authorization: `Bearer ${getToken()}` } })
+    if (!res.ok) throw new ApiError(res.status, 'ERROR', 'Não foi possível abrir o documento')
+    const url = URL.createObjectURL(await res.blob())
+    win.location.href = url
+    setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  } catch (err) {
+    win?.close()
+    throw err
+  }
+}
+
 export const errorText = (err) =>
   err?.details?.length
     ? `${err.message}: ${err.details.map((d) => `${d.field} ${d.message}`).join('; ')}`

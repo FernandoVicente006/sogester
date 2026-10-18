@@ -7,7 +7,24 @@ export const STATUS_LABELS = {
   SUSPENSO: 'Suspenso',
 }
 
+export const PROCESS_STATUS_LABELS = {
+  SUBMETIDO: 'Submetido',
+  EM_ANALISE: 'Em análise',
+  REJEITADO: 'Rejeitado',
+  DOCUMENTOS_PENDENTES: 'Documentos pendentes',
+  DOCUMENTOS_SUBMETIDOS: 'Documentos submetidos',
+  AUTORIZACAO_EMITIDA: 'Autorização emitida',
+  PAGAMENTO_PENDENTE: 'Pagamento pendente',
+  PAGAMENTO_SUBMETIDO: 'Pagamento submetido',
+  PAGAMENTO_CONFIRMADO: 'Pagamento confirmado',
+  CONCLUIDO: 'Concluído',
+}
+
 export const Badge = ({ status }) => <span className={`badge badge-${status}`}>{STATUS_LABELS[status] ?? status}</span>
+
+export const ProcessBadge = ({ status }) => (
+  <span className={`badge pbadge-${status}`}>{PROCESS_STATUS_LABELS[status] ?? status}</span>
+)
 
 export function Modal({ title, onClose, children }) {
   useEffect(() => {
@@ -43,3 +60,6 @@ export const ErrorBox = ({ message }) =>
       {message}
     </p>
   ) : null
+
+export const formatDate = (iso) =>
+  iso ? new Date(iso).toLocaleString('pt-PT', { dateStyle: 'short', timeStyle: 'short' }) : ''

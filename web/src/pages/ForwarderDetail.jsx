@@ -65,7 +65,7 @@ export default function ForwarderDetail() {
   return (
     <>
       <p>
-        <Link to="/">← Transitários</Link>
+        <Link to="/transitarios">← Transitários</Link>
       </p>
       <div className="toolbar">
         {f.logoPath && <img className="logo" src={`/uploads/${f.logoPath}`} alt={`Logótipo de ${f.name}`} />}

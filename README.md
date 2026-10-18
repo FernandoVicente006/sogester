@@ -5,8 +5,14 @@ Camada digital entre transitários e a Sogester (terminais de Cabinda, Soyo e Lu
 
 ## Estado
 
-Passo 1 do plano: entidades/terminais, perfis de acesso e registo de transitários.
-Próximo: submissão de processos (estados SUBMETIDO → … → CONCLUIDO), fila por prioridade, chat, faturação.
+- Passo 1: entidades/terminais, perfis de acesso e registo de transitários.
+- Passo 2: submissão de processos (cliente, carga, documentos), fila por prioridade, análise pela Loja
+  (SUBMETIDO → EM_ANALISE → DOCUMENTOS_PENDENTES/REJEITADO) e histórico de estados.
+- Próximo: autorização digital e faturação (AUTORIZACAO_EMITIDA → … → CONCLUIDO), chat, compromisso de pagamento
+  para perecíveis.
+
+Fila (staff): urgência pedida → prioridade da carga (perecível, perigosa, descarga direta, restantes) → chegada.
+Esta ordem é um pressuposto a confirmar com a Sogester (ver "Pontos em aberto" no Notion).
 
 ## Arranque
 

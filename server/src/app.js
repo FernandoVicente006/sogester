@@ -1,3 +1,4 @@
+import path from 'node:path';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -13,7 +14,8 @@ export function createApp() {
   app.use(cors({ origin: config.corsOrigin }));
   app.use(express.json({ limit: '100kb' }));
 
-  app.use('/uploads', express.static(uploadsDir, { index: false, dotfiles: 'deny' }));
+  // Só os logótipos são públicos; documentos de processos passam por endpoint autenticado.
+  app.use('/uploads/logos', express.static(path.join(uploadsDir, 'logos'), { index: false, dotfiles: 'deny' }));
   app.use('/api/v1', v1);
 
   app.use((_req, _res, next) => next(new HttpError(404, 'NOT_FOUND', 'Rota não encontrada')));

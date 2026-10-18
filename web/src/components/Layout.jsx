@@ -9,9 +9,8 @@ export default function Layout() {
       <aside className="sidebar">
         <h1>Sogester</h1>
         <nav>
-          <NavLink to="/" end>
-            Transitários
-          </NavLink>
+          <NavLink to="/processos">Processos</NavLink>
+          <NavLink to="/transitarios">{user.role === 'TRANSITARIO' ? 'O meu perfil' : 'Transitários'}</NavLink>
           {isAdmin && <NavLink to="/funcionarios">Funcionários</NavLink>}
           {user.role === 'SUPER_ADMIN' && <NavLink to="/entidades">Entidades</NavLink>}
         </nav>

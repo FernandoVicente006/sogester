@@ -7,6 +7,12 @@ import Forwarders from './pages/Forwarders.jsx'
 import ForwarderDetail from './pages/ForwarderDetail.jsx'
 import Staff from './pages/Staff.jsx'
 import Entities from './pages/Entities.jsx'
+import Processes from './pages/Processes.jsx'
+import NewProcess from './pages/NewProcess.jsx'
+import ProcessDetail from './pages/ProcessDetail.jsx'
+
+/** Página inicial: a fila de processos (cada perfil já vê só o que lhe cabe). */
+const Home = () => <Navigate to="/processos" replace />
 
 function Protected({ roles, children }) {
   const { user, loading } = useAuth()
@@ -28,8 +34,19 @@ export default function App() {
           </Protected>
         }
       >
-        <Route index element={<Forwarders />} />
+        <Route index element={<Home />} />
+        <Route path="transitarios" element={<Forwarders />} />
         <Route path="transitarios/:id" element={<ForwarderDetail />} />
+        <Route path="processos" element={<Processes />} />
+        <Route
+          path="processos/novo"
+          element={
+            <Protected roles={['TRANSITARIO']}>
+              <NewProcess />
+            </Protected>
+          }
+        />
+        <Route path="processos/:id" element={<ProcessDetail />} />
         <Route
           path="funcionarios"
           element={
