@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, errorText } from '../api.js'
-import { ErrorBox } from '../components/ui.jsx'
+import { ErrorBox, PageHeader } from '../components/ui.jsx'
 
 export default function Entities() {
   const [entities, setEntities] = useState([])
@@ -29,11 +29,9 @@ export default function Entities() {
 
   return (
     <>
-      <div className="toolbar">
-        <h2>Entidades</h2>
-      </div>
-      <p className="muted">O MVP funciona apenas em Cabinda; ative Soyo e Luanda quando estiverem prontas.</p>
+      <PageHeader title="Entidades" subtitle="O MVP funciona apenas em Cabinda; ative Soyo e Luanda quando estiverem prontas." />
       <ErrorBox message={error} />
+      <div className="table-wrap">
       <table>
         <thead>
           <tr>
@@ -55,6 +53,7 @@ export default function Entities() {
           ))}
         </tbody>
       </table>
+      </div>
     </>
   )
 }

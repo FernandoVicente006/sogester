@@ -323,6 +323,7 @@ v1.post(
     }
   },
 );
+v1.get('/processes/stats', authenticate, async (req, res) => res.json({ stats: await processes.processStats(req.user) }));
 v1.get(
   '/processes',
   authenticate,

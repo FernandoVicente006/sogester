@@ -14,6 +14,9 @@ Camada digital entre transitários e a Sogester (terminais de Cabinda, Soyo e Lu
 - Passo 4: chat por processo (Sogester ↔ transitário) com texto e anexos (PDF/PNG/JPG, até 3 por mensagem),
   visualizador embutido, mensagens não lidas por utilizador e conversa só de leitura em processos encerrados.
   A interface atualiza por polling (8 s); websockets/e-mail ficam para quando houver notificações.
+- Design: sistema visual baseado em sogester.co.ao (azul institucional #054C83, âmbar de segurança, Poppins/Inter),
+  painel com indicadores, indicador de progresso do processo, layout responsivo. Tokens em `web/src/styles.css`;
+  o logótipo oficial (versão negativa, de sogester.co.ao) está em `web/public/logo-sogester.png`.
 - Próximo: notificações (e-mail/push), relatórios e integração com o sistema da Sogester.
 
 Salvaguardas de receita: carga perecível só é autorizada com compromisso assinado (palavra-passe); o prazo

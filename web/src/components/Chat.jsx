@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, errorText } from '../api.js'
 import { useAuth } from '../auth.jsx'
-import { ErrorBox, formatDate } from './ui.jsx'
+import { ErrorBox, Icon, formatDate } from './ui.jsx'
 import Viewer from './Viewer.jsx'
 
 const POLL_MS = 8000
@@ -100,7 +100,7 @@ export default function Chat({ processId, closed, onRead }) {
 
   return (
     <section className="card chat">
-      <h3>Conversa</h3>
+      <h3><Icon name="message" /> Conversa</h3>
       <div className="messages" ref={listRef} aria-live="polite">
         {!messages.length && <p className="muted center">Sem mensagens. Use a conversa para pedir ou enviar documentos.</p>}
         {messages.map((m) => (
@@ -111,7 +111,7 @@ export default function Chat({ processId, closed, onRead }) {
             {m.body && <p>{m.body}</p>}
             {m.attachments.map((a) => (
               <button key={a.id} className="attachment" onClick={() => setViewing({ path: `${base}/${m.id}/attachments/${a.id}`, name: a.originalName })}>
-                📎 {a.originalName} <span className="muted">({formatSize(a.sizeBytes)})</span>
+                <Icon name="paperclip" /> {a.originalName} <span className="muted">({formatSize(a.sizeBytes)})</span>
               </button>
             ))}
           </div>
@@ -136,7 +136,7 @@ export default function Chat({ processId, closed, onRead }) {
           <div className="composer-bar">
             <input ref={fileInput} type="file" multiple accept="application/pdf,image/png,image/jpeg" onChange={pickFiles} aria-label="Anexos" />
             <button className="primary" disabled={sending || (!text.trim() && !files.length)}>
-              {sending ? 'A enviar…' : 'Enviar'}
+              <Icon name="send" /> {sending ? 'A enviar…' : 'Enviar'}
             </button>
           </div>
         </form>

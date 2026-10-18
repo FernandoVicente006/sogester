@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api, errorText } from '../api.js'
 import { useAuth } from '../auth.jsx'
-import { Badge, ErrorBox, Field } from '../components/ui.jsx'
+import { Badge, ErrorBox, Field, Icon } from '../components/ui.jsx'
 
 const MANAGE = ['SUPER_ADMIN', 'ADMIN_ENTIDADE', 'CADASTRO']
 
@@ -64,12 +64,13 @@ export default function ForwarderDetail() {
 
   return (
     <>
-      <p>
-        <Link to="/transitarios">← Transitários</Link>
-      </p>
-      <div className="toolbar">
+      <Link to="/transitarios" className="crumb">
+        <Icon name="back" /> Transitários
+      </Link>
+      <div className="process-head">
         {f.logoPath && <img className="logo" src={`/uploads/${f.logoPath}`} alt={`Logótipo de ${f.name}`} />}
         <h2>{f.name}</h2>
+        <span className="muted">NIF {f.nif}</span>
       </div>
       <ErrorBox message={error} />
       {saved && <p className="ok">Guardado.</p>}
@@ -109,6 +110,7 @@ export default function ForwarderDetail() {
 
       <section className="card">
         <h3>Terminais</h3>
+        <div className="table-wrap">
         <table>
           <thead>
             <tr>
@@ -137,6 +139,7 @@ export default function ForwarderDetail() {
             ))}
           </tbody>
         </table>
+        </div>
       </section>
     </>
   )

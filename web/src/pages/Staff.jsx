@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, errorText } from '../api.js'
 import { ROLE_LABELS, useAuth } from '../auth.jsx'
-import { ErrorBox, Field, Modal } from '../components/ui.jsx'
+import { ErrorBox, Field, Icon, Modal, PageHeader } from '../components/ui.jsx'
 
 const ASSIGNABLE = ['LOJA', 'CADASTRO', 'FATURACAO']
 
@@ -40,13 +40,13 @@ export default function Staff() {
 
   return (
     <>
-      <div className="toolbar">
-        <h2>Funcionários</h2>
+      <PageHeader title="Funcionários" subtitle="Atribua a cada pessoa o perfil da sua etapa: Loja, Cadastro ou Faturação.">
         <button className="primary" onClick={() => setCreating(true)}>
-          Novo funcionário
+          <Icon name="plus" /> Novo funcionário
         </button>
-      </div>
+      </PageHeader>
       <ErrorBox message={error} />
+      <div className="table-wrap">
       <table>
         <thead>
           <tr>
@@ -87,6 +87,7 @@ export default function Staff() {
           ))}
         </tbody>
       </table>
+      </div>
       {creating && (
         <CreateUser
           entities={entities}

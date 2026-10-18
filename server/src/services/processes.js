@@ -210,6 +210,44 @@ export async function listProcesses(actor, { status, q, entityId, forwarderId } 
   return rows.map((r) => ({ ...mapProcess(r), unreadMessages: unread.get(r.id) ?? 0 }));
 }
 
+/** Indicadores do painel, limitados ao que o ator pode ver. */
+export async function processStats(actor) {
+  const scope = scopeClause(actor);
+  const rows = await query(
+    `SELECT p.status, COUNT(*) AS n,
+            SUM(p.urgency_requested = 1) AS urgent,
+            SUM(p.cargo_priority = 'PERECIVEL') AS perishable,
+            SUM(pc.due_at IS NOT NULL AND pc.due_at < NOW()) AS overdue
+       FROM processes p
+       LEFT JOIN payment_commitments pc ON pc.process_id = p.id
+      WHERE ${scope.sql}
+      GROUP BY p.status`,
+    scope.params,
+  );
+  const byStatus = {};
+  const stats = { total: 0, active: 0, urgent: 0, perishable: 0, overdue: 0 };
+  for (const r of rows) {
+    byStatus[r.status] = Number(r.n);
+    stats.total += Number(r.n);
+    if (!['CONCLUIDO', 'REJEITADO'].includes(r.status)) {
+      stats.active += Number(r.n);
+      stats.urgent += Number(r.urgent);
+      stats.perishable += Number(r.perishable);
+    }
+    if (!['PAGAMENTO_CONFIRMADO', 'CONCLUIDO'].includes(r.status)) stats.overdue += Number(r.overdue);
+  }
+  const n = (...s) => s.reduce((a, k) => a + (byStatus[k] ?? 0), 0);
+  return {
+    ...stats,
+    byStatus,
+    awaitingReview: n('SUBMETIDO', 'DOCUMENTOS_SUBMETIDOS'),
+    awaitingDocuments: n('DOCUMENTOS_PENDENTES'),
+    awaitingPaymentValidation: n('PAGAMENTO_SUBMETIDO'),
+    awaitingPayment: n('PAGAMENTO_PENDENTE'),
+    completed: n('CONCLUIDO'),
+  };
+}
+
 export async function getProcess(actor, id) {
   const process = mapProcess(await loadAccessible(actor, id));
   const [documents, history, commitment, authorization, invoice] = await Promise.all([
@@ -280,7 +318,15 @@ export async function transition(actor, id, { status, notes }) {
     throw conflict(`Transição ${process.status} → ${status} não permitida`, 'INVALID_TRANSITION');
   }
   if (NOTES_REQUIRED.includes(status) && !notes) throw badRequest('Indique o motivo ou os documentos em falta', 'NOTES_REQUIRED');
-  await changeStatus(actor, process, status, notes);
+  await withTransaction(async (conn) => {
+    await changeStatus(actor, process, status, notes, conn);
+    if (status === 'DOCUMENTOS_PENDENTES') {
+      await conn.query(
+        'UPDATE processes SET docs_baseline_id = (SELECT COALESCE(MAX(id), 0) FROM process_documents WHERE process_id = ?) WHERE id = ?',
+        [id, id],
+      );
+    }
+  });
   return getProcess(actor, id);
 }
 
@@ -304,9 +350,7 @@ export async function submitDocuments(actor, id) {
     throw conflict('O processo não aguarda documentos', 'INVALID_TRANSITION');
   }
   const sinceRequest = await queryOne(
-    `SELECT COUNT(*) AS n FROM process_documents
-      WHERE process_id = ? AND created_at >= (SELECT MAX(created_at) FROM process_status_history
-                                              WHERE process_id = ? AND to_status = 'DOCUMENTOS_PENDENTES')`,
+    'SELECT COUNT(*) AS n FROM process_documents WHERE process_id = ? AND id > (SELECT docs_baseline_id FROM processes WHERE id = ?)',
     [id, id],
   );
   if (!sinceRequest.n) throw badRequest('Anexe pelo menos um documento antes de submeter', 'NO_NEW_DOCUMENTS');

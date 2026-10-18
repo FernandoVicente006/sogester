@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api, errorText } from '../api.js'
-import { ErrorBox, Field } from '../components/ui.jsx'
+import { ErrorBox, Field, Icon, PageHeader } from '../components/ui.jsx'
 
 const EMPTY_CLIENT = { type: 'SINGULAR', name: '', documentNumber: '', isForeign: false, phone: '', email: '', address: '' }
 
@@ -96,9 +96,7 @@ export default function NewProcess() {
   if (!terminals.length) {
     return (
       <>
-        <p>
-          <Link to="/processos">← Processos</Link>
-        </p>
+        <Link to="/processos" className="crumb"><Icon name="back" /> Processos</Link>
         <p className="error">Ainda não está aprovado em nenhum terminal. Contacte a Sogester.</p>
       </>
     )
@@ -112,10 +110,8 @@ export default function NewProcess() {
 
   return (
     <>
-      <p>
-        <Link to="/processos">← Processos</Link>
-      </p>
-      <h2>Novo processo</h2>
+      <Link to="/processos" className="crumb"><Icon name="back" /> Processos</Link>
+      <PageHeader title="Novo processo" subtitle="Cadastre o cliente, a carga e anexe a documentação exigida." />
       <form onSubmit={submit} className="stack">
         <section className="card stack">
           <h3>Terminal</h3>
@@ -292,9 +288,7 @@ export default function NewProcess() {
         </section>
 
         <ErrorBox message={error} />
-        <button className="primary" disabled={busy}>
-          {busy ? 'A submeter…' : 'Submeter processo'}
-        </button>
+        <div><button className="primary" disabled={busy}>{busy ? 'A submeter…' : 'Submeter processo'}</button></div>
       </form>
     </>
   )

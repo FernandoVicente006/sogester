@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, errorText } from '../api.js'
 import { useAuth } from '../auth.jsx'
-import { Badge, ErrorBox, Field, Modal, STATUS_LABELS } from '../components/ui.jsx'
+import { Badge, Empty, ErrorBox, Field, Icon, Modal, PageHeader, STATUS_LABELS, SearchInput } from '../components/ui.jsx'
 
 const MANAGE = ['SUPER_ADMIN', 'ADMIN_ENTIDADE', 'CADASTRO']
 
@@ -10,6 +10,7 @@ export default function Forwarders() {
   const { user } = useAuth()
   const canManage = MANAGE.includes(user.role)
   const [items, setItems] = useState([])
+  const [loaded, setLoaded] = useState(false)
   const [q, setQ] = useState('')
   const [status, setStatus] = useState('')
   const [error, setError] = useState('')
@@ -21,6 +22,7 @@ export default function Forwarders() {
       if (q) params.set('q', q)
       if (status) params.set('status', status)
       setItems((await api('GET', `/forwarders?${params}`)).forwarders)
+      setLoaded(true)
       setError('')
     } catch (err) {
       setError(errorText(err))
@@ -34,20 +36,24 @@ export default function Forwarders() {
 
   return (
     <>
-      <div className="toolbar">
-        <h2>Transitários</h2>
+      <PageHeader
+        title={user.role === 'TRANSITARIO' ? 'O meu perfil' : 'Transitários'}
+        subtitle={user.role === 'TRANSITARIO' ? 'Os seus dados e os terminais onde está aprovado.' : 'Cadastro, verificação e aprovação por terminal.'}
+      >
         {canManage && user.role !== 'SUPER_ADMIN' && (
-          <button onClick={() => setModal('link')}>Vincular por NIF</button>
+          <button onClick={() => setModal('link')}>
+            <Icon name="truck" /> Vincular por NIF
+          </button>
         )}
         {canManage && (
           <button className="primary" onClick={() => setModal('create')}>
-            Novo transitário
+            <Icon name="plus" /> Novo transitário
           </button>
         )}
-      </div>
+      </PageHeader>
 
       <div className="filters">
-        <input placeholder="Pesquisar nome, NIF ou e-mail" value={q} onChange={(e) => setQ(e.target.value)} />
+        <SearchInput value={q} onChange={setQ} placeholder="Pesquisar nome, NIF ou e-mail" />
         {user.role !== 'TRANSITARIO' && (
           <select value={status} onChange={(e) => setStatus(e.target.value)}>
             <option value="">Todos os estados</option>
@@ -61,6 +67,7 @@ export default function Forwarders() {
       </div>
 
       <ErrorBox message={error} />
+      <div className="table-wrap">
       <table>
         <thead>
           <tr>
@@ -87,15 +94,10 @@ export default function Forwarders() {
               </td>
             </tr>
           ))}
-          {!items.length && (
-            <tr>
-              <td colSpan={4} className="muted center">
-                Sem transitários.
-              </td>
-            </tr>
-          )}
         </tbody>
       </table>
+      {loaded && !items.length && <Empty icon="truck">Sem transitários.</Empty>}
+      </div>
 
       {modal === 'create' && (
         <CreateForwarder

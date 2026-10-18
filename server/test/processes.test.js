@@ -231,4 +231,14 @@ test('submissão, fila, estados e documentos de processos', async () => {
   exe.append('data', JSON.stringify(cargo()));
   exe.append('ep17', new Blob(['MZ'], { type: 'application/x-msdownload' }), 'x.exe');
   assert.equal((await api('POST', '/processes', { token: fwdA, form: exe })).status, 400);
+
+  // --- indicadores do painel, limitados ao alcance de cada utilizador
+  const stats = (await api('GET', '/processes/stats', { token: loja })).body.stats;
+  assert.equal(stats.total, 6);
+  assert.equal(stats.active, 5);
+  assert.equal(stats.urgent, 1);
+  assert.equal(stats.perishable, 1);
+  assert.equal(stats.byStatus.REJEITADO, 1);
+  assert.equal((await api('GET', '/processes/stats', { token: fwdB })).body.stats.total, 0);
+  assert.equal((await api('GET', '/processes/stats')).status, 401);
 });

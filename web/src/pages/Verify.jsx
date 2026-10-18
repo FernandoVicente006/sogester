@@ -16,7 +16,7 @@ export default function Verify() {
   }, [code])
 
   return (
-    <div className="card auth">
+    <div className="auth-solo"><div className="auth">
       <h1>Verificar autorização</h1>
       <p className="muted">
         Código <code>{code}</code>
@@ -45,6 +45,6 @@ export default function Verify() {
       <p className="muted small">
         <Link to="/login">Sogester</Link>
       </p>
-    </div>
+    </div></div>
   )
 }

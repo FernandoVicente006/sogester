@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { errorText } from '../api.js'
 import { useAuth } from '../auth.jsx'
+import AuthShell from '../components/AuthShell.jsx'
 import { ErrorBox, Field } from '../components/ui.jsx'
 
 export default function Login() {
@@ -29,22 +30,26 @@ export default function Login() {
   }
 
   return (
-    <form className="card auth" onSubmit={submit}>
-      <h1>Sogester</h1>
-      <p className="muted">Gestão de processos portuários</p>
-      <Field label="E-mail">
-        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus />
-      </Field>
-      <Field label="Palavra-passe">
-        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-      </Field>
-      <ErrorBox message={error} />
-      <button className="primary" disabled={busy}>
-        {busy ? 'A entrar…' : 'Entrar'}
-      </button>
-      <p className="muted small">
-        Primeira utilização de uma entidade? <Link to="/setup">Inicializar administrador</Link>
-      </p>
-    </form>
+    <AuthShell>
+      <form className="auth" onSubmit={submit}>
+        <div>
+          <h1>Iniciar sessão</h1>
+          <p className="muted">Aceda ao portal de processos portuários.</p>
+        </div>
+        <Field label="E-mail">
+          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="username" required autoFocus />
+        </Field>
+        <Field label="Palavra-passe">
+          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required />
+        </Field>
+        <ErrorBox message={error} />
+        <button className="primary" disabled={busy}>
+          {busy ? 'A entrar…' : 'Entrar'}
+        </button>
+        <p className="muted small">
+          Primeira utilização de um terminal? <Link to="/setup">Inicializar administrador</Link>
+        </p>
+      </form>
+    </AuthShell>
   )
 }

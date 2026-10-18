@@ -4,7 +4,42 @@ import { api, errorText } from '../api.js'
 import { useAuth } from '../auth.jsx'
 import Chat from '../components/Chat.jsx'
 import Viewer from '../components/Viewer.jsx'
-import { ErrorBox, Field, PROCESS_STATUS_LABELS, ProcessBadge, formatDate } from '../components/ui.jsx'
+import { ErrorBox, Field, Icon, PRIORITY_LABELS, PROCESS_STATUS_LABELS, ProcessBadge, formatDate } from '../components/ui.jsx'
+
+// Fases do ciclo de vida para o indicador de progresso (cada fase agrupa vários estados).
+const PHASES = ['Submetido', 'Análise', 'Autorização', 'Pagamento', 'Concluído']
+const PHASE_OF = {
+  SUBMETIDO: 0,
+  EM_ANALISE: 1,
+  DOCUMENTOS_PENDENTES: 1,
+  DOCUMENTOS_SUBMETIDOS: 1,
+  AUTORIZACAO_EMITIDA: 2,
+  PAGAMENTO_PENDENTE: 3,
+  PAGAMENTO_SUBMETIDO: 3,
+  PAGAMENTO_CONFIRMADO: 3,
+  CONCLUIDO: 4,
+}
+
+function Stepper({ process: p }) {
+  const rejected = p.status === 'REJEITADO'
+  // Em processos rejeitados, a falha marca a fase em que estava antes da rejeição.
+  const before = rejected ? p.history.at(-2)?.toStatus : null
+  const current = rejected ? (PHASE_OF[before] ?? 0) : PHASE_OF[p.status]
+  const finished = p.status === 'CONCLUIDO'
+  return (
+    <ol className="stepper" aria-label="Progresso do processo">
+      {PHASES.map((label, i) => {
+        const state = finished || i < current ? 'done' : i === current ? (rejected ? 'failed' : 'current') : ''
+        return (
+          <li key={label} className={state} aria-current={state === 'current' ? 'step' : undefined}>
+            <span className="dot">{state === 'done' ? <Icon name="check" /> : state === 'failed' ? <Icon name="x" /> : i + 1}</span>
+            {label}
+          </li>
+        )
+      })}
+    </ol>
+  )
+}
 
 const DOC_LABELS = {
   BILHETE: 'Bilhete de identidade',
@@ -23,7 +58,6 @@ const AUTHORIZERS = ['SUPER_ADMIN', 'ADMIN_ENTIDADE', 'LOJA']
 const BILLERS = ['SUPER_ADMIN', 'ADMIN_ENTIDADE', 'FATURACAO']
 const money = (amount, currency) => new Intl.NumberFormat('pt-AO', { style: 'currency', currency }).format(amount)
 const VOLUME_LABELS = { ALTO: 'Alto', CARGA_GRANEL: 'Carga granel', CARGA_GERAL: 'Carga geral', CONTENTOR: 'Contentor' }
-const PRIORITY_LABELS = { PERECIVEL: 'Perecível', CARGA_PERIGOSA: 'Carga perigosa', DESCARGA_DIRETA: 'Descarga direta', NAO_PRIORITARIO: 'Não prioritário' }
 
 // Transições que a Sogester pode fazer a partir de cada estado (espelha o servidor).
 const STAFF_ACTIONS = {
@@ -117,22 +151,33 @@ export default function ProcessDetail() {
 
   return (
     <>
-      <p>
-        <Link to="/processos">← Processos</Link>
-      </p>
-      <div className="toolbar">
+      <Link to="/processos" className="crumb">
+        <Icon name="back" /> Processos
+      </Link>
+      <div className="process-head">
         <h2>{p.reference}</h2>
         <ProcessBadge status={p.status} />
+        {p.urgencyRequested && <span className="tag urgent">Urgente</span>}
+        <span className={`tag prio-${p.cargoPriority}`}>{PRIORITY_LABELS[p.cargoPriority]}</span>
+        {p.paymentOverdue && <span className="tag urgent">Pagamento em atraso</span>}
       </div>
+      <Stepper process={p} />
       <ErrorBox message={error} />
-      {p.statusNotes && ['DOCUMENTOS_PENDENTES', 'REJEITADO'].includes(p.status) && (
-        <p className="notice">
-          <strong>Sogester:</strong> {p.statusNotes}
+      {p.statusNotes && ['DOCUMENTOS_PENDENTES', 'REJEITADO', 'PAGAMENTO_PENDENTE'].includes(p.status) && (
+        <p className={p.status === 'REJEITADO' ? 'notice danger' : 'notice'}>
+          <Icon name="alert" />
+          <span>
+            <strong>Sogester:</strong> {p.statusNotes}
+          </span>
         </p>
       )}
 
+      <div className="detail-grid">
+      <div>
       <section className="card">
-        <h3>Detalhes</h3>
+        <h3>
+          <Icon name="file" /> Detalhes
+        </h3>
         <dl className="details">
           {row('Terminal', p.entityCode)}
           {row('Transitário', p.forwarderName)}
@@ -153,7 +198,7 @@ export default function ProcessDetail() {
 
       {actions.length > 0 && (
         <section className="card stack">
-          <h3>Análise</h3>
+          <h3><Icon name="clipboard" /> Análise</h3>
           <Field label="Motivo / documentos em falta (obrigatório ao pedir documentos ou rejeitar)">
             <input value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={500} />
           </Field>
@@ -169,7 +214,7 @@ export default function ProcessDetail() {
 
       {needsCommitment && terms && (
         <section className="card stack">
-          <h3>Compromisso de pagamento</h3>
+          <h3><Icon name="shield" /> Compromisso de pagamento</h3>
           <p className="muted">
             Carga perecível: para a Sogester emitir a autorização de saída sem esperar todo o ciclo de faturação, assine o
             compromisso abaixo.
@@ -207,7 +252,7 @@ export default function ProcessDetail() {
 
       {canAuthorize && (
         <section className="card stack">
-          <h3>Autorização digital</h3>
+          <h3><Icon name="shield" /> Autorização digital</h3>
           {p.cargoPriority === 'PERECIVEL' && !p.hasCommitment ? (
             <p className="muted">Carga perecível: aguarda o compromisso de pagamento assinado pelo transitário.</p>
           ) : (
@@ -231,7 +276,7 @@ export default function ProcessDetail() {
 
       {p.authorization && (
         <section className="card">
-          <h3>Autorização digital</h3>
+          <h3><Icon name="shield" /> Autorização digital</h3>
           <dl className="details">
             {row('Código', <code>{p.authorization.code}</code>)}
             {row('Tipo', p.authorization.type === 'SAIDA_ANTECIPADA' ? 'Saída antecipada (compromisso de pagamento)' : 'Padrão')}
@@ -246,7 +291,7 @@ export default function ProcessDetail() {
 
       {isBiller && p.status === 'AUTORIZACAO_EMITIDA' && (
         <section className="card">
-          <h3>Emitir proforma</h3>
+          <h3><Icon name="card" /> Emitir proforma</h3>
           <form
             className="stack"
             onSubmit={(e) => {
@@ -283,7 +328,7 @@ export default function ProcessDetail() {
 
       {p.invoice && (
         <section className="card">
-          <h3>Faturação</h3>
+          <h3><Icon name="card" /> Faturação</h3>
           <dl className="details">
             {row('Proforma', p.invoice.proformaNumber)}
             {row('Valor', money(p.invoice.amount, p.invoice.currency))}
@@ -358,14 +403,15 @@ export default function ProcessDetail() {
       )}
 
       <section className="card">
-        <h3>Documentos</h3>
+        <h3><Icon name="paperclip" /> Documentos</h3>
         <ul className="docs">
           {p.documents.map((d) => (
             <li key={d.id}>
+              <Icon name="file" />
               <button className="link" onClick={() => open(d)}>
                 {DOC_LABELS[d.kind]}: {d.originalName}
               </button>
-              <span className="muted small"> · {formatDate(d.createdAt)}</span>
+              <span className="muted small" style={{ marginLeft: "auto" }}>{formatDate(d.createdAt)}</span>
             </li>
           ))}
         </ul>
@@ -395,21 +441,29 @@ export default function ProcessDetail() {
         )}
       </section>
 
+      </div>
+      <div>
       <Chat processId={p.id} closed={['CONCLUIDO', 'REJEITADO'].includes(p.status)} onRead={() => window.dispatchEvent(new Event('sogester:unread'))} />
       {viewing && <Viewer path={viewing.path} name={viewing.name} onClose={() => setViewing(null)} />}
 
       <section className="card">
-        <h3>Histórico</h3>
+        <h3>
+          <Icon name="clock" /> Histórico
+        </h3>
         <ol className="history">
           {p.history.map((h, i) => (
             <li key={i}>
-              <strong>{PROCESS_STATUS_LABELS[h.toStatus]}</strong> · {h.changedBy} ·{' '}
-              <span className="muted">{formatDate(h.createdAt)}</span>
-              {h.notes && <div className="muted">{h.notes}</div>}
+              <strong>{PROCESS_STATUS_LABELS[h.toStatus]}</strong>
+              <div className="muted small">
+                {h.changedBy} · {formatDate(h.createdAt)}
+              </div>
+              {h.notes && <div className="small">{h.notes}</div>}
             </li>
           ))}
         </ol>
       </section>
+      </div>
+      </div>
     </>
   )
 }

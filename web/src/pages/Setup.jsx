@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api, errorText } from '../api.js'
+import AuthShell from '../components/AuthShell.jsx'
 import { ErrorBox, Field } from '../components/ui.jsx'
 
 /** Inicialização do administrador (diretor-geral): escolhe o terminal, que fica vinculado em definitivo. */
@@ -37,11 +38,14 @@ export default function Setup() {
   }
 
   return (
-    <form className="card auth" onSubmit={submit}>
-      <h1>Inicializar entidade</h1>
-      <p className="muted">
-        O administrador fica vinculado em definitivo ao terminal escolhido e não poderá ver dados de outras entidades.
-      </p>
+    <AuthShell>
+    <form className="auth" onSubmit={submit}>
+      <div>
+        <h1>Inicializar terminal</h1>
+        <p className="muted">
+          O administrador fica vinculado em definitivo ao terminal escolhido e não poderá ver dados de outras entidades.
+        </p>
+      </div>
       <Field label="Terminal">
         <select value={form.entityCode} onChange={set('entityCode')} required>
           {entities.map((en) => (
@@ -71,5 +75,6 @@ export default function Setup() {
         <Link to="/login">Voltar ao início de sessão</Link>
       </p>
     </form>
+    </AuthShell>
   )
 }
