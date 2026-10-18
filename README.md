@@ -11,7 +11,10 @@ Camada digital entre transitários e a Sogester (terminais de Cabinda, Soyo e Lu
 - Passo 3: autorização digital (código assinado com HMAC, verificável em `/verificar/:código`), compromisso de
   pagamento para perecíveis (saída antecipada) e faturação manual: proforma → comprovativo → confirmação → fatura
   recibo (AUTORIZACAO_EMITIDA → … → CONCLUIDO).
-- Próximo: chat por processo e notificações.
+- Passo 4: chat por processo (Sogester ↔ transitário) com texto e anexos (PDF/PNG/JPG, até 3 por mensagem),
+  visualizador embutido, mensagens não lidas por utilizador e conversa só de leitura em processos encerrados.
+  A interface atualiza por polling (8 s); websockets/e-mail ficam para quando houver notificações.
+- Próximo: notificações (e-mail/push), relatórios e integração com o sistema da Sogester.
 
 Salvaguardas de receita: carga perecível só é autorizada com compromisso assinado (palavra-passe); o prazo
 (`PAYMENT_COMMITMENT_DAYS`, 3 por omissão) conta a partir da autorização; compromissos em atraso bloqueiam novos

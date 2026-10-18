@@ -79,6 +79,7 @@ export default function Processes() {
             <tr key={p.id}>
               <td>
                 <Link to={`/processos/${p.id}`}>{p.reference}</Link>
+                {p.unreadMessages > 0 && <span className="count" title="Mensagens por ler">{p.unreadMessages}</span>}
               </td>
               {!isForwarder && <td>{p.forwarderName}</td>}
               <td>{p.client.name}</td>

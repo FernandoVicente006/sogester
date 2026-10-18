@@ -15,6 +15,7 @@ import * as auth from '../services/auth.js';
 import * as billing from '../services/billing.js';
 import * as entities from '../services/entities.js';
 import * as forwarders from '../services/forwarders.js';
+import * as messages from '../services/messages.js';
 import * as processes from '../services/processes.js';
 import * as setup from '../services/setup.js';
 import * as users from '../services/users.js';
@@ -480,6 +481,52 @@ v1.post(
   ...withUpload('receipt', schemas.receipt, (req, data) =>
     billing.issueReceipt(req.user, req.valid.params.id, data, req.file),
   ),
+);
+
+// ---- chat por processo ---------------------------------------------------------------------
+v1.get('/messages/unread', authenticate, async (req, res) => res.json({ total: await messages.unreadTotal(req.user) }));
+v1.get(
+  '/processes/:id/messages',
+  authenticate,
+  validate({ params: idParam, query: z.object({ after: id.optional() }) }),
+  async (req, res) =>
+    res.json({ messages: await messages.listMessages(req.user, req.valid.params.id, { after: req.valid.query.after }) }),
+);
+v1.post(
+  '/processes/:id/messages',
+  authenticate,
+  validate({ params: idParam }),
+  docUpload.array('files', 3),
+  async (req, res) => {
+    const files = (req.files ?? []).map((file) => ({ file }));
+    try {
+      const body = typeof req.body?.text === 'string' ? req.body.text : '';
+      res.status(201).json({ message: await messages.postMessage(req.user, req.valid.params.id, body, req.files ?? []) });
+    } catch (err) {
+      await removeUploaded(files);
+      throw err;
+    }
+  },
+);
+v1.post('/processes/:id/messages/read', authenticate, validate({ params: idParam }), async (req, res) => {
+  await messages.markRead(req.user, req.valid.params.id);
+  res.status(204).end();
+});
+v1.get(
+  '/processes/:id/messages/:messageId/attachments/:attId',
+  authenticate,
+  validate({ params: z.object({ id, messageId: id, attId: id }) }),
+  async (req, res) => {
+    const { id: processId, messageId, attId } = req.valid.params;
+    const att = await messages.getAttachmentFile(req.user, processId, messageId, attId);
+    res.sendFile(att.absolutePath, {
+      headers: {
+        'Content-Type': att.mimeType,
+        'Content-Disposition': `inline; filename*=UTF-8''${encodeURIComponent(att.originalName)}`,
+        'Cache-Control': 'private, no-store',
+      },
+    });
+  },
 );
 
 // Verificação pública de um código de autorização (sem dados do cliente)

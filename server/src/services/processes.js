@@ -60,7 +60,7 @@ function mapProcess(r) {
 }
 
 /** Condição SQL que limita os processos visíveis ao ator. */
-function scopeClause(actor) {
+export function scopeClause(actor) {
   if (isForwarder(actor)) return { sql: 'p.forwarder_id = ?', params: [actor.forwarderId] };
   if (isSuperAdmin(actor)) return { sql: '1 = 1', params: [] };
   return { sql: 'p.entity_id = ?', params: [actor.entityId] };
@@ -71,6 +71,20 @@ export async function loadAccessible(actor, id) {
   const row = await queryOne(`${SELECT} WHERE p.id = ? AND ${scope.sql}`, [id, ...scope.params]);
   if (!row) throw notFound('Processo não encontrado');
   return row;
+}
+
+/** Mensagens de outros ainda não lidas pelo ator, por processo. */
+export async function unreadByProcess(actor, processIds) {
+  if (!processIds.length) return new Map();
+  const rows = await query(
+    `SELECT m.process_id AS processId, COUNT(*) AS n
+       FROM process_messages m
+       LEFT JOIN message_reads r ON r.process_id = m.process_id AND r.user_id = ?
+      WHERE m.process_id IN (?) AND m.sender_id <> ? AND m.id > COALESCE(r.last_read_id, 0)
+      GROUP BY m.process_id`,
+    [actor.id, processIds, actor.id],
+  );
+  return new Map(rows.map((r) => [r.processId, Number(r.n)]));
 }
 
 // ---- validação de regras de negócio --------------------------------------------------------
@@ -192,7 +206,8 @@ export async function listProcesses(actor, { status, q, entityId, forwarderId } 
     ? 'p.submitted_at DESC, p.id DESC'
     : "(p.status IN ('CONCLUIDO','REJEITADO')) ASC, p.urgency_requested DESC, p.priority_rank ASC, p.submitted_at ASC, p.id ASC";
   const rows = await query(`${SELECT} WHERE ${where.join(' AND ')} ORDER BY ${order} LIMIT 200`, params);
-  return rows.map(mapProcess);
+  const unread = await unreadByProcess(actor, rows.map((r) => r.id));
+  return rows.map((r) => ({ ...mapProcess(r), unreadMessages: unread.get(r.id) ?? 0 }));
 }
 
 export async function getProcess(actor, id) {
@@ -229,6 +244,7 @@ export async function getProcess(actor, id) {
   ]);
   return {
     ...process,
+    unreadMessages: (await unreadByProcess(actor, [id])).get(id) ?? 0,
     documents,
     history,
     commitment: commitment ?? null,

@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { api, errorText, openDocument } from '../api.js'
+import { api, errorText } from '../api.js'
 import { useAuth } from '../auth.jsx'
+import Chat from '../components/Chat.jsx'
+import Viewer from '../components/Viewer.jsx'
 import { ErrorBox, Field, PROCESS_STATUS_LABELS, ProcessBadge, formatDate } from '../components/ui.jsx'
 
 const DOC_LABELS = {
@@ -50,6 +52,7 @@ export default function ProcessDetail() {
     }
   }, [])
 
+  const [viewing, setViewing] = useState(null)
   const [terms, setTerms] = useState(null)
   const [sign, setSign] = useState({ password: '', accept: false })
   const [proforma, setProforma] = useState({ number: '', amount: '', paymentEntity: '', paymentReference: '', file: null })
@@ -103,13 +106,7 @@ export default function ProcessDetail() {
     e.target.reset()
   }
 
-  const open = async (doc) => {
-    try {
-      await openDocument(`/processes/${id}/documents/${doc.id}`)
-    } catch (err) {
-      setError(errorText(err))
-    }
-  }
+  const open = (doc) => setViewing({ path: `/processes/${id}/documents/${doc.id}`, name: doc.originalName })
 
   const row = (label, value) => (
     <>
@@ -397,6 +394,9 @@ export default function ProcessDetail() {
           </>
         )}
       </section>
+
+      <Chat processId={p.id} closed={['CONCLUIDO', 'REJEITADO'].includes(p.status)} onRead={() => window.dispatchEvent(new Event('sogester:unread'))} />
+      {viewing && <Viewer path={viewing.path} name={viewing.name} onClose={() => setViewing(null)} />}
 
       <section className="card">
         <h3>Histórico</h3>

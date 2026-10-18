@@ -55,3 +55,10 @@ export const errorText = (err) =>
   err?.details?.length
     ? `${err.message}: ${err.details.map((d) => `${d.field} ${d.message}`).join('; ')}`
     : (err?.message ?? 'Erro')
+
+/** Descarrega um ficheiro privado (pedido autenticado) como blob. */
+export async function fetchBlob(path) {
+  const res = await fetch(`/api/v1${path}`, { headers: { Authorization: `Bearer ${getToken()}` } })
+  if (!res.ok) throw new ApiError(res.status, 'ERROR', 'Não foi possível abrir o ficheiro')
+  return res.blob()
+}

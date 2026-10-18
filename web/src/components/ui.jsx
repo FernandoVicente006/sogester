@@ -26,7 +26,7 @@ export const ProcessBadge = ({ status }) => (
   <span className={`badge pbadge-${status}`}>{PROCESS_STATUS_LABELS[status] ?? status}</span>
 )
 
-export function Modal({ title, onClose, children }) {
+export function Modal({ title, onClose, wide, children }) {
   useEffect(() => {
     const onKey = (e) => e.key === 'Escape' && onClose()
     window.addEventListener('keydown', onKey)
@@ -34,7 +34,7 @@ export function Modal({ title, onClose, children }) {
   }, [onClose])
   return (
     <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal" role="dialog" aria-modal="true" aria-label={title}>
+      <div className={wide ? 'modal wide' : 'modal'} role="dialog" aria-modal="true" aria-label={title}>
         <header>
           <h2>{title}</h2>
           <button className="link" onClick={onClose} aria-label="Fechar">
