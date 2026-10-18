@@ -12,6 +12,7 @@ import NewProcess from './pages/NewProcess.jsx'
 import ProcessDetail from './pages/ProcessDetail.jsx'
 import Verify from './pages/Verify.jsx'
 import Dashboard from './pages/Dashboard.jsx'
+import Notifications from './pages/Notifications.jsx'
 
 /** Página inicial: a fila de processos (cada perfil já vê só o que lhe cabe). */
 const Home = () => <Navigate to="/painel" replace />
@@ -39,6 +40,7 @@ export default function App() {
       >
         <Route index element={<Home />} />
         <Route path="painel" element={<Dashboard />} />
+        <Route path="notificacoes" element={<Notifications />} />
         <Route path="transitarios" element={<Forwarders />} />
         <Route path="transitarios/:id" element={<ForwarderDetail />} />
         <Route path="processos" element={<Processes />} />

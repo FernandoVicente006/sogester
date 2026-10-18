@@ -63,6 +63,7 @@ const VOLUME_LABELS = { ALTO: 'Alto', CARGA_GRANEL: 'Carga granel', CARGA_GERAL:
 const STAFF_ACTIONS = {
   SUBMETIDO: [['EM_ANALISE', 'Iniciar análise'], ['REJEITADO', 'Rejeitar']],
   EM_ANALISE: [['DOCUMENTOS_PENDENTES', 'Pedir documentos'], ['REJEITADO', 'Rejeitar']],
+  DOCUMENTOS_PENDENTES: [['REJEITADO', 'Rejeitar (sem resposta)']],
   DOCUMENTOS_SUBMETIDOS: [['EM_ANALISE', 'Voltar à análise'], ['DOCUMENTOS_PENDENTES', 'Pedir documentos'], ['REJEITADO', 'Rejeitar']],
 }
 const NOTES_REQUIRED = ['DOCUMENTOS_PENDENTES', 'REJEITADO']

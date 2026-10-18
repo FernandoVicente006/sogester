@@ -21,7 +21,8 @@ export async function authenticate(req, _res, next) {
   }
 
   const row = await queryOne(
-    `SELECT id, name, email, role, entity_id AS entityId, forwarder_id AS forwarderId, active
+    `SELECT id, name, email, role, entity_id AS entityId, forwarder_id AS forwarderId, active,
+            email_notifications AS emailNotifications
        FROM users WHERE id = ?`,
     [payload.sub],
   );

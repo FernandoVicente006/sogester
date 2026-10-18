@@ -21,6 +21,18 @@ export const config = {
   authorizationSecret: required('AUTHORIZATION_SECRET', 'dev-only-authorization-secret'),
   // Dias que o transitário tem para liquidar após uma saída antecipada (carga perecível).
   commitmentDays: Number(process.env.PAYMENT_COMMITMENT_DAYS ?? 3),
+  // URL pública do frontend (links nos e-mails).
+  appUrl: process.env.APP_URL ?? 'http://localhost:5173',
+  // E-mail por SMTP; sem SMTP_HOST as notificações ficam só dentro da plataforma.
+  mail: {
+    host: process.env.SMTP_HOST ?? '',
+    port: Number(process.env.SMTP_PORT ?? 587),
+    secure: process.env.SMTP_SECURE === 'true',
+    user: process.env.SMTP_USER ?? '',
+    pass: process.env.SMTP_PASS ?? '',
+    from: process.env.MAIL_FROM ?? 'Sogester <no-reply@sogester.local>',
+    maxAttempts: Number(process.env.MAIL_MAX_ATTEMPTS ?? 5),
+  },
   corsOrigin: process.env.CORS_ORIGIN ?? 'http://localhost:5173',
   db: {
     host: process.env.DB_HOST ?? 'localhost',

@@ -7,6 +7,7 @@ import { CARGO_PRIORITIES, VOLUME_TYPES, isVehicleCategory } from '../cargo.js';
 import { isForwarder, isSuperAdmin } from '../roles.js';
 import { audit } from './audit.js';
 import { isApprovedIn } from './forwarders.js';
+import { notifyProcessEvent } from './notifications.js';
 
 export const documentsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../uploads/documents');
 
@@ -17,6 +18,7 @@ export const documentsDir = path.join(path.dirname(fileURLToPath(import.meta.url
 export const STAFF_TRANSITIONS = {
   SUBMETIDO: ['EM_ANALISE', 'REJEITADO'],
   EM_ANALISE: ['DOCUMENTOS_PENDENTES', 'REJEITADO'],
+  DOCUMENTOS_PENDENTES: ['REJEITADO'], // sem resposta do transitário
   DOCUMENTOS_SUBMETIDOS: ['EM_ANALISE', 'DOCUMENTOS_PENDENTES', 'REJEITADO'],
 };
 const NOTES_REQUIRED = ['DOCUMENTOS_PENDENTES', 'REJEITADO'];
@@ -178,7 +180,9 @@ export async function createProcess(actor, input, files) {
     await audit(actor, 'PROCESS_SUBMITTED', 'process', res.insertId, { entityId: entity.id, details: { reference }, conn });
     return res.insertId;
   });
-  return getProcess(actor, id);
+  const created = await getProcess(actor, id);
+  await notifyProcessEvent('PROCESS_SUBMITTED', created, { actor });
+  return created;
 }
 
 export async function insertDocument(conn, processId, kind, file, userId) {
@@ -327,6 +331,8 @@ export async function transition(actor, id, { status, notes }) {
       );
     }
   });
+  const event = { EM_ANALISE: process.status === 'SUBMETIDO' ? 'ANALYSIS_STARTED' : null, DOCUMENTOS_PENDENTES: 'DOCUMENTS_REQUESTED', REJEITADO: 'PROCESS_REJECTED' }[status];
+  if (event) await notifyProcessEvent(event, process, { actor, notes });
   return getProcess(actor, id);
 }
 
@@ -355,6 +361,7 @@ export async function submitDocuments(actor, id) {
   );
   if (!sinceRequest.n) throw badRequest('Anexe pelo menos um documento antes de submeter', 'NO_NEW_DOCUMENTS');
   await changeStatus(actor, process, 'DOCUMENTOS_SUBMETIDOS', null);
+  await notifyProcessEvent('DOCUMENTS_RESUBMITTED', process, { actor });
   return getProcess(actor, id);
 }
 

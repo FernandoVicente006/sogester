@@ -250,7 +250,7 @@ a.kpi:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgb(15 23 42 /
   .shell { grid-template-columns: 1fr; }
   .sidebar { position: fixed; inset: 0 auto 0 0; width: 270px; height: 100vh; z-index: 40; transform: translateX(-105%); transition: transform .2s; }
   .sidebar.open { transform: none; box-shadow: var(--shadow-lg); }
-  .menu-toggle { display: inline-flex; position: sticky; top: .5rem; z-index: 30; margin: .75rem 0 0 1rem; width: 42px; padding: 0; }
+  .menu-toggle { display: inline-flex; width: 42px; padding: 0; }
   main { padding: 1rem 1rem 2.5rem; }
   .row { flex-direction: column; }
   .page-head h2 { font-size: 1.3rem; }
@@ -277,3 +277,28 @@ input[type='file']::file-selector-button:hover { background: var(--brand-100); }
 /* logótipo oficial: recorte da tela transparente (2560×1877) à área útil */
 .brand-logo { display: block; height: auto; aspect-ratio: 2196 / 1568; object-fit: cover; object-view-box: inset(134px 180px 175px 184px); max-width: 100%; }
 .brand { padding: .25rem .5rem .1rem; }
+
+/* ---------- notificações ---------- */
+.topbar { display: flex; align-items: center; justify-content: flex-end; gap: .75rem; margin: -.5rem 0 .75rem; min-height: 40px; }
+.topbar .menu-toggle { margin-right: auto; }
+.bell { position: relative; }
+.bell-btn { position: relative; width: 40px; padding: 0; border-radius: 50%; }
+.bell-count { position: absolute; top: -4px; right: -4px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 999px; background: var(--danger); color: #fff; font-size: .68rem; font-weight: 700; display: grid; place-items: center; border: 2px solid var(--bg); }
+.bell-panel { position: absolute; right: 0; top: calc(100% + .5rem); width: min(380px, calc(100vw - 2rem)); background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-lg); z-index: 40; overflow: hidden; }
+.bell-head { display: flex; justify-content: space-between; align-items: center; padding: .75rem 1rem; border-bottom: 1px solid var(--border); }
+.bell-panel ul, .notif-list { list-style: none; margin: 0; padding: 0; max-height: 420px; overflow-y: auto; }
+.bell-foot { display: block; text-align: center; padding: .7rem; border-top: 1px solid var(--border); font-weight: 500; text-decoration: none; background: #f8fafc; }
+.notif { display: flex; gap: .75rem; align-items: flex-start; width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: #fff; padding: .75rem 1rem; min-height: 0; }
+.notif:hover { background: var(--brand-50); }
+.notif.unread { background: #f3f8fe; }
+.notif.unread .notif-icon { background: var(--brand); color: #fff; }
+.notif-icon { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; background: #eef2f7; color: var(--muted); flex: none; }
+.notif-text { display: flex; flex-direction: column; gap: .1rem; min-width: 0; flex: 1; font-weight: 400; }
+.notif-text strong { font-weight: 600; font-size: .88rem; color: var(--navy-900); }
+.notif-text span { font-size: .82rem; color: #475569; overflow-wrap: anywhere; }
+.notif-date { white-space: nowrap; }
+.notif-list .notif { border-radius: 0; }
+@media (max-width: 860px) {
+  .topbar { margin-top: 0; position: sticky; top: 0; background: var(--bg); z-index: 30; padding: .5rem 0; }
+  .topbar .menu-toggle { position: static; margin: 0 auto 0 0; }
+}

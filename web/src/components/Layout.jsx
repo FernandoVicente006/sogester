@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { api } from '../api.js'
 import { ROLE_LABELS, useAuth } from '../auth.jsx'
+import NotificationBell from './NotificationBell.jsx'
 import { Avatar, Brand, Icon } from './ui.jsx'
 
 /** Total de mensagens por ler; atualiza periodicamente e quando o chat marca mensagens como lidas. */
@@ -43,9 +44,6 @@ export default function Layout() {
 
   return (
     <div className="shell">
-      <button className="menu-toggle" onClick={() => setOpen((o) => !o)} aria-label="Abrir menu" aria-expanded={open}>
-        <Icon name="menu" />
-      </button>
       <aside className={open ? 'sidebar open' : 'sidebar'}>
         <Brand />
         {terminal && (
@@ -92,6 +90,12 @@ export default function Layout() {
         </div>
       </aside>
       <main>
+        <div className="topbar">
+          <button className="menu-toggle" onClick={() => setOpen((o) => !o)} aria-label="Abrir menu" aria-expanded={open}>
+            <Icon name="menu" />
+          </button>
+          <NotificationBell />
+        </div>
         <Outlet />
       </main>
     </div>

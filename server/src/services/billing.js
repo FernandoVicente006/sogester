@@ -5,6 +5,7 @@ import { queryOne, withTransaction } from '../db/pool.js';
 import { badRequest, conflict, forbidden } from '../errors.js';
 import { isForwarder } from '../roles.js';
 import { audit } from './audit.js';
+import { notifyProcessEvent } from './notifications.js';
 import { changeStatus, getProcess, insertDocument, loadAccessible } from './processes.js';
 
 export const COMMITMENT_TERMS_VERSION = '1.0';
@@ -66,6 +67,7 @@ export async function signCommitment(actor, id, { password, accept }, ip) {
     );
     await audit(actor, 'PAYMENT_COMMITMENT_SIGNED', 'process', id, { entityId: process.entityId, conn });
   });
+  await notifyProcessEvent('COMMITMENT_SIGNED', process, { actor });
   return getProcess(actor, id);
 }
 
@@ -114,6 +116,7 @@ export async function issueAuthorization(actor, id, { notes } = {}) {
     }
     await audit(actor, 'AUTHORIZATION_ISSUED', 'process', id, { entityId: process.entityId, details: { type, code }, conn });
   });
+  await notifyProcessEvent('AUTHORIZATION_ISSUED', process, { actor });
   return getProcess(actor, id);
 }
 
@@ -160,6 +163,7 @@ export async function issueProforma(actor, id, data, file) {
     await insertDocument(conn, id, 'PROFORMA', file, actor.id);
     await audit(actor, 'PROFORMA_ISSUED', 'process', id, { entityId: process.entityId, details: { number: data.number }, conn });
   });
+  await notifyProcessEvent('PROFORMA_ISSUED', process, { actor });
   return getProcess(actor, id);
 }
 
@@ -175,6 +179,7 @@ export async function submitPaymentProof(actor, id, file) {
     await insertDocument(conn, id, 'COMPROVATIVO', file, actor.id);
     await audit(actor, 'PAYMENT_PROOF_SUBMITTED', 'process', id, { entityId: process.entityId, conn });
   });
+  await notifyProcessEvent('PAYMENT_PROOF_SUBMITTED', process, { actor });
   return getProcess(actor, id);
 }
 
@@ -186,6 +191,7 @@ export async function confirmPayment(actor, id, { notes } = {}) {
     await conn.query('UPDATE invoices SET payment_confirmed_by = ?, payment_confirmed_at = NOW() WHERE process_id = ?', [actor.id, id]);
     await audit(actor, 'PAYMENT_CONFIRMED', 'process', id, { entityId: process.entityId, conn });
   });
+  await notifyProcessEvent('PAYMENT_CONFIRMED', process, { actor });
   return getProcess(actor, id);
 }
 
@@ -198,6 +204,7 @@ export async function rejectPayment(actor, id, { notes }) {
     await conn.query('UPDATE invoices SET proof_submitted_at = NULL WHERE process_id = ?', [id]);
     await audit(actor, 'PAYMENT_PROOF_REJECTED', 'process', id, { entityId: process.entityId, details: { notes }, conn });
   });
+  await notifyProcessEvent('PAYMENT_PROOF_REJECTED', process, { actor, notes });
   return getProcess(actor, id);
 }
 
@@ -215,6 +222,7 @@ export async function issueReceipt(actor, id, { number }, file) {
     await insertDocument(conn, id, 'FATURA_RECIBO', file, actor.id);
     await audit(actor, 'RECEIPT_ISSUED', 'process', id, { entityId: process.entityId, details: { number }, conn });
   });
+  await notifyProcessEvent('PROCESS_COMPLETED', process, { actor });
   return getProcess(actor, id);
 }
 

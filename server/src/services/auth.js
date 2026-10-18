@@ -11,6 +11,7 @@ const publicUser = (u) => ({
   role: u.role,
   entityId: u.entityId ?? u.entity_id ?? null,
   forwarderId: u.forwarderId ?? u.forwarder_id ?? null,
+  emailNotifications: !!(u.emailNotifications ?? u.email_notifications ?? 1),
 });
 
 export async function login(email, password) {

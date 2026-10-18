@@ -16,6 +16,7 @@ import * as billing from '../services/billing.js';
 import * as entities from '../services/entities.js';
 import * as forwarders from '../services/forwarders.js';
 import * as messages from '../services/messages.js';
+import * as notifications from '../services/notifications.js';
 import * as processes from '../services/processes.js';
 import * as setup from '../services/setup.js';
 import * as users from '../services/users.js';
@@ -483,6 +484,27 @@ v1.post(
     billing.issueReceipt(req.user, req.valid.params.id, data, req.file),
   ),
 );
+
+// ---- notificações --------------------------------------------------------------------------
+v1.get(
+  '/notifications',
+  authenticate,
+  validate({ query: z.object({ unread: z.enum(['0', '1']).optional(), limit: z.coerce.number().int().min(1).max(100).optional() }) }),
+  async (req, res) =>
+    res.json(await notifications.listNotifications(req.user, { unreadOnly: req.valid.query.unread === '1', limit: req.valid.query.limit })),
+);
+v1.post('/notifications/read-all', authenticate, async (req, res) => {
+  await notifications.markAllNotificationsRead(req.user);
+  res.status(204).end();
+});
+v1.post('/notifications/:id/read', authenticate, validate({ params: idParam }), async (req, res) => {
+  await notifications.markNotificationRead(req.user, req.valid.params.id);
+  res.status(204).end();
+});
+v1.patch('/auth/preferences', authenticate, validate({ body: z.object({ emailNotifications: z.boolean() }) }), async (req, res) => {
+  await notifications.setEmailPreference(req.user, req.valid.body.emailNotifications);
+  res.json({ emailNotifications: req.valid.body.emailNotifications });
+});
 
 // ---- chat por processo ---------------------------------------------------------------------
 v1.get('/messages/unread', authenticate, async (req, res) => res.json({ total: await messages.unreadTotal(req.user) }));

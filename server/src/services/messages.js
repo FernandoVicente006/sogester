@@ -2,6 +2,7 @@ import path from 'node:path';
 import { pool, query, queryOne, withTransaction } from '../db/pool.js';
 import { badRequest, conflict, notFound } from '../errors.js';
 import { audit } from './audit.js';
+import { markMessageNotificationsRead, notifyMessage } from './notifications.js';
 import { documentsDir, loadAccessible, scopeClause } from './processes.js';
 
 const CLOSED = ['CONCLUIDO', 'REJEITADO'];
@@ -77,12 +78,14 @@ export async function postMessage(actor, processId, body, files) {
     );
     return res.insertId;
   });
+  await notifyMessage(process, actor, text);
   const [message] = await listMessages(actor, processId, { after: id - 1 });
   return message;
 }
 
 export async function markRead(actor, processId) {
   await loadAccessible(actor, processId);
+  await markMessageNotificationsRead(actor, processId);
   await pool.query(
     `INSERT INTO message_reads (user_id, process_id, last_read_id)
      SELECT ?, ?, COALESCE(MAX(id), 0) FROM process_messages WHERE process_id = ?

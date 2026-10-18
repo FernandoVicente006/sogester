@@ -23,6 +23,8 @@ const ICONS = {
   back: '<path d="m15 18-6-6 6-6"/>',
   menu: '<path d="M4 12h16M4 6h16M4 18h16"/>',
   card: '<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/>',
+  bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
+  mail: '<rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>',
   inbox: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
 }
 
@@ -155,6 +157,15 @@ export const ErrorBox = ({ message }) =>
       {message}
     </p>
   ) : null
+
+/** "agora", "há 5 min", "há 3 h" ou a data, para listas de notificações. */
+export function timeAgo(iso) {
+  const s = (Date.now() - new Date(iso).getTime()) / 1000
+  if (s < 60) return 'agora'
+  if (s < 3600) return `há ${Math.floor(s / 60)} min`
+  if (s < 86400) return `há ${Math.floor(s / 3600)} h`
+  return formatDate(iso)
+}
 
 export const formatDate = (iso) =>
   iso ? new Date(iso).toLocaleString('pt-PT', { dateStyle: 'short', timeStyle: 'short' }) : ''

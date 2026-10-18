@@ -17,7 +17,12 @@ Camada digital entre transitários e a Sogester (terminais de Cabinda, Soyo e Lu
 - Design: sistema visual baseado em sogester.co.ao (azul institucional #054C83, âmbar de segurança, Poppins/Inter),
   painel com indicadores, indicador de progresso do processo, layout responsivo. Tokens em `web/src/styles.css`;
   o logótipo oficial (versão negativa, de sogester.co.ao) está em `web/public/logo-sogester.png`.
-- Próximo: notificações (e-mail/push), relatórios e integração com o sistema da Sogester.
+- Passo 5: notificações dentro da plataforma (sino, página e preferências) e por e-mail (SMTP, fila com tentativas).
+  Avisam Loja/administrador de novas submissões e documentos reenviados, Faturação de autorizações e comprovativos,
+  transitários de cada mudança de estado, e todos dos prazos de pagamento (lembrete 24 h antes e alerta de atraso).
+  Mensagens do chat agrupam-se numa notificação por destinatário. Configure `SMTP_*`, `MAIL_FROM` e `APP_URL`
+  em `server/.env`; sem `SMTP_HOST` ficam só na plataforma.
+- Próximo: relatórios, cancelamento de processos após autorização e integração com o sistema da Sogester.
 
 Salvaguardas de receita: carga perecível só é autorizada com compromisso assinado (palavra-passe); o prazo
 (`PAYMENT_COMMITMENT_DAYS`, 3 por omissão) conta a partir da autorização; compromissos em atraso bloqueiam novos
