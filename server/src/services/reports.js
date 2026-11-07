@@ -16,9 +16,9 @@ export const STATUS_LABELS = {
   DOCUMENTOS_PENDENTES: 'Documentos pendentes',
   DOCUMENTOS_SUBMETIDOS: 'Documentos submetidos',
   EM_PROCESSAMENTO_INTERNO: 'Em processamento interno',
-  PAGAMENTO_PENDENTE: 'Pagamento pendente',
-  PAGAMENTO_SUBMETIDO: 'Pagamento submetido',
-  PAGAMENTO_CONFIRMADO: 'Pagamento confirmado',
+  PAGAMENTO_PENDENTE: 'Pendente de pagamento',
+  PAGAMENTO_SUBMETIDO: 'Pagamento em análise',
+  PAGAMENTO_CONFIRMADO: 'Aguarda recibo',
   CONCLUIDO: 'Concluído',
   CANCELADO: 'Cancelado',
 };

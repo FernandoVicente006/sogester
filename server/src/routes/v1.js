@@ -114,7 +114,7 @@ const schemas = {
     urgencyReason: z.string().trim().max(500).optional(),
   }),
   processList: z.object({
-    status: z.string().trim().max(30).optional(),
+    status: z.string().trim().max(120).optional(), // um estado ou vários separados por vírgulas
     q: z.string().trim().max(100).optional(),
     entityId: id.optional(),
     forwarderId: id.optional(),

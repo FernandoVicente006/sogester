@@ -199,7 +199,7 @@ export async function listProcesses(actor, { status, q, entityId, forwarderId } 
   const scope = scopeClause(actor);
   const where = [scope.sql];
   const params = [...scope.params];
-  if (status) (where.push('p.status = ?'), params.push(status));
+  if (status) (where.push('p.status IN (?)'), params.push(status.split(',')));
   if (q) {
     where.push('(p.reference LIKE ? OR c.name LIKE ? OR c.document_number LIKE ? OR f.name LIKE ?)');
     params.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
@@ -249,6 +249,7 @@ export async function processStats(actor) {
     awaitingDocuments: n('DOCUMENTOS_PENDENTES'),
     awaitingPaymentValidation: n('PAGAMENTO_SUBMETIDO'),
     awaitingPayment: n('PAGAMENTO_PENDENTE'),
+    awaitingReceipt: n('PAGAMENTO_CONFIRMADO'),
     completed: n('CONCLUIDO'),
     cancelled: n('CANCELADO'),
   };

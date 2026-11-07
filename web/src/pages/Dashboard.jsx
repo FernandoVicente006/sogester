@@ -28,6 +28,7 @@ const Kpi = ({ icon, tone = '', value, label, to }) => {
 export default function Dashboard() {
   const { user } = useAuth()
   const isForwarder = user.role === 'TRANSITARIO'
+  const isFinance = user.role === 'FINANCAS'
   const [stats, setStats] = useState(null)
   const [queue, setQueue] = useState([])
   const [error, setError] = useState('')
@@ -36,10 +37,10 @@ export default function Dashboard() {
     Promise.all([api('GET', '/processes/stats'), api('GET', '/processes')])
       .then(([s, p]) => {
         setStats(s.stats)
-        setQueue(p.processes.filter((x) => !['CONCLUIDO', 'REJEITADO', 'CANCELADO'].includes(x.status)).slice(0, 6))
+        setQueue(p.processes.filter((x) => (isFinance ? x.status.startsWith('PAGAMENTO') : !['CONCLUIDO', 'REJEITADO', 'CANCELADO'].includes(x.status))).slice(0, 6))
       })
       .catch((err) => setError(errorText(err)))
-  }, [])
+  }, [isFinance])
 
   const hour = new Date().getHours()
   const greeting = hour < 12 ? 'Bom dia' : hour < 19 ? 'Boa tarde' : 'Boa noite'
@@ -58,7 +59,9 @@ export default function Dashboard() {
       {stats && (
         <div className="kpis">
           <Kpi icon="clipboard" value={stats.active} label="Processos em curso" to="/processos" />
-          {!isForwarder && <Kpi icon="file" tone="amber" value={stats.awaitingReview} label="Para analisar" to="/processos?status=SUBMETIDO" />}
+          {!isForwarder && !isFinance && <Kpi icon="file" tone="amber" value={stats.awaitingReview} label="Para analisar" to="/processos?status=SUBMETIDO" />}
+          {isFinance && <Kpi icon="file" tone="amber" value={stats.awaitingReceipt} label="Recibos por enviar" to="/processos?status=PAGAMENTO_CONFIRMADO" />}
+          {isFinance && <Kpi icon="clock" value={stats.awaitingPayment} label="Pendentes de pagamento" to="/processos?status=PAGAMENTO_PENDENTE" />}
           {isForwarder && <Kpi icon="file" tone="amber" value={stats.awaitingDocuments} label="Documentos a enviar" to="/processos?status=DOCUMENTOS_PENDENTES" />}
           <Kpi icon="card" tone="amber" value={isForwarder ? stats.awaitingPayment : stats.awaitingPaymentValidation} label={isForwarder ? 'Pagamentos pendentes' : 'Comprovativos a validar'} to={isForwarder ? '/processos?status=PAGAMENTO_PENDENTE' : '/processos?status=PAGAMENTO_SUBMETIDO'} />
           <Kpi icon="zap" tone="red" value={stats.urgent} label="Urgências pedidas" />
@@ -69,8 +72,8 @@ export default function Dashboard() {
 
       <div className="page-head">
         <div>
-          <h3 style={{ margin: 0 }}>{isForwarder ? 'Processos recentes' : 'Fila prioritária'}</h3>
-          {!isForwarder && <p className="small">Urgência, tipo de carga e ordem de chegada.</p>}
+          <h3 style={{ margin: 0 }}>{isForwarder ? 'Processos recentes' : isFinance ? 'Fila de pagamentos' : 'Fila prioritária'}</h3>
+          {!isForwarder && !isFinance && <p className="small">Urgência, tipo de carga e ordem de chegada.</p>}
         </div>
         <div className="spacer">
           <Link to="/processos" className="button">

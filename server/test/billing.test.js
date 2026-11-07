@@ -146,6 +146,8 @@ test('fluxo normal, proforma, comprovativo, fatura recibo e saída antecipada', 
   await step(fat, '/confirm-payment', 409, { id: p.id, req: { body: {} } }); // sem comprovativo
   const proofed = (await step(fwdA, '/payment-proof', 200, { id: p.id, req: { form: form(null, ['proof']) } })).process;
   assert.equal(proofed.status, 'PAGAMENTO_SUBMETIDO');
+  const queue = (await api('GET', '/processes?status=PAGAMENTO_SUBMETIDO,PAGAMENTO_CONFIRMADO', { token: fat })).body.processes;
+  assert.deepEqual(queue.map((x) => x.id), [p.id], 'fila das Finanças aceita vários estados');
 
   await step(fat, '/reject-payment', 400, { id: p.id, req: { body: {} } });
   const rejected = (await step(fat, '/reject-payment', 200, { id: p.id, req: { body: { notes: 'Valor não confere' } } })).process;

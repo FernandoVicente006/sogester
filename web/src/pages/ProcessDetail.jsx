@@ -3,7 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { api, errorText } from '../api.js'
 import { useAuth } from '../auth.jsx'
 import Chat from '../components/Chat.jsx'
-import Viewer from '../components/Viewer.jsx'
+import Viewer, { DocumentPane } from '../components/Viewer.jsx'
 import { ErrorBox, Field, Icon, Modal, PRIORITY_LABELS, PROCESS_STATUS_LABELS, ProcessBadge, formatDate } from '../components/ui.jsx'
 
 // Fases do ciclo de vida para o indicador de progresso (cada fase agrupa vários estados).
@@ -73,6 +73,7 @@ const STAFF_ACTIONS = {
   EM_PROCESSAMENTO_INTERNO: [['DOCUMENTOS_PENDENTES', 'Pedir documentos'], ['REJEITADO', 'Rejeitar']],
 }
 const NOTES_REQUIRED = ['DOCUMENTOS_PENDENTES', 'REJEITADO']
+const BILLING_DOCS = ['PROFORMA', 'COMPROVATIVO', 'FATURA_RECIBO']
 const REVIEWERS = ['SUPER_ADMIN', 'ADMIN_ENTIDADE', 'LOJA']
 
 const PRE_AUTH = ['SUBMETIDO', 'EM_ANALISE', 'DOCUMENTOS_PENDENTES', 'DOCUMENTOS_SUBMETIDOS']
@@ -115,6 +116,8 @@ export default function ProcessDetail() {
   const [proforma, setProforma] = useState({ number: '', amount: '', paymentEntity: '', paymentReference: '', file: null })
   const [receipt, setReceipt] = useState({ number: '', file: null })
   const [proofFile, setProofFile] = useState(null)
+  const [paying, setPaying] = useState(false)
+  const [reviewing, setReviewing] = useState(false)
 
   useEffect(() => {
     run(() => api('GET', `/processes/${id}`))
@@ -183,7 +186,19 @@ export default function ProcessDetail() {
     e.target.reset()
   }
 
-  const open = (doc) => setViewing({ path: `/processes/${id}/documents/${doc.id}`, name: doc.originalName })
+  const documentPath = (doc) => `/processes/${id}/documents/${doc.id}`
+  const open = (doc) => setViewing({ path: documentPath(doc), name: doc.originalName })
+  // Um comprovativo recusado é substituído: o último documento de cada tipo é o que conta.
+  const latest = (kind) => p.documents.findLast((d) => d.kind === kind)
+  const proformaDoc = latest('PROFORMA')
+  const proofDoc = latest('COMPROVATIVO')
+  const receiptDoc = latest('FATURA_RECIBO')
+  const inspectable = p.documents.filter((d) => !BILLING_DOCS.includes(d.kind))
+  const reject = () => {
+    post('/reject-payment', { body: { notes: notes.trim() } })
+    setNotes('')
+    setReviewing(false)
+  }
 
   const row = (label, value) => (
     <>
@@ -242,6 +257,17 @@ export default function ProcessDetail() {
       {actions.length > 0 && (
         <section className="card stack">
           <h3><Icon name="clipboard" /> Análise</h3>
+          <p className="muted small">Abra cada documento para inspecionar e decida abaixo.</p>
+          <ul className="docs">
+            {inspectable.map((d) => (
+              <li key={d.id}>
+                <Icon name="file" />
+                <button className="link" onClick={() => open(d)}>
+                  {DOC_LABELS[d.kind]}: {d.originalName}
+                </button>
+              </li>
+            ))}
+          </ul>
           <Field label="Motivo / documentos em falta (obrigatório ao pedir documentos ou rejeitar)">
             <input value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={500} />
           </Field>
@@ -374,39 +400,46 @@ export default function ProcessDetail() {
           </dl>
 
           {isForwarder && p.status === 'PAGAMENTO_PENDENTE' && (
-            <form
-              className="row end"
-              onSubmit={(e) => {
-                e.preventDefault()
-                post('/payment-proof', { form: formWith(null, 'proof', proofFile) })
-                setProofFile(null)
-                e.target.reset()
-              }}
-            >
-              <Field label="Comprovativo de pagamento (PDF ou imagem)">
-                <input type="file" accept="application/pdf,image/png,image/jpeg" onChange={(e) => setProofFile(e.target.files[0])} required />
-              </Field>
-              <button className="primary">Carregar comprovativo</button>
-            </form>
+            <div className="stack">
+              <p className="muted">Veja a proforma, pague no aplicativo do banco ou no ATM e depois clique em «Já paguei» para enviar o comprovativo.</p>
+              <div className="actions-left">
+                {proformaDoc && (
+                  <button onClick={() => open(proformaDoc)}>
+                    <Icon name="file" /> Ver ou descarregar proforma
+                  </button>
+                )}
+                <button className="primary" onClick={() => setPaying(true)}>
+                  Já paguei
+                </button>
+              </div>
+            </div>
+          )}
+
+          {isForwarder && p.status === 'PAGAMENTO_SUBMETIDO' && (
+            <p className="notice">
+              <Icon name="clock" /> Comprovativo enviado: as Finanças estão a verificar o pagamento.
+            </p>
+          )}
+          {isForwarder && p.status === 'PAGAMENTO_CONFIRMADO' && (
+            <p className="notice">
+              <Icon name="clock" /> Pagamento confirmado: aguarde a fatura recibo.
+            </p>
+          )}
+
+          {receiptDoc && (
+            <div className="actions-left">
+              <button className="primary" onClick={() => open(receiptDoc)}>
+                <Icon name="download" /> Ver ou descarregar fatura recibo
+              </button>
+            </div>
           )}
 
           {isFinance && p.status === 'PAGAMENTO_SUBMETIDO' && (
             <div className="stack">
-              <Field label="Motivo (obrigatório para recusar o comprovativo)">
-                <input value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={500} />
-              </Field>
-              <div className="actions-left">
-                <button className="primary" onClick={() => post('/confirm-payment', { body: {} })}>
-                  Confirmar pagamento
-                </button>
-                <button
-                  onClick={() => {
-                    if (!notes.trim()) return setError('Indique o motivo para recusar o comprovativo.')
-                    post('/reject-payment', { body: { notes: notes.trim() } })
-                    setNotes('')
-                  }}
-                >
-                  Recusar comprovativo
+              <p className="muted">Compare o comprovativo do transitário com a proforma antes de decidir.</p>
+              <div>
+                <button className="primary" onClick={() => setReviewing(true)}>
+                  Verificar pagamento
                 </button>
               </div>
             </div>
@@ -509,6 +542,63 @@ export default function ProcessDetail() {
       <div>
       <Chat processId={p.id} closed={['CONCLUIDO', 'REJEITADO', 'CANCELADO'].includes(p.status)} onRead={() => window.dispatchEvent(new Event('sogester:unread'))} />
       {viewing && <Viewer path={viewing.path} name={viewing.name} onClose={() => setViewing(null)} />}
+      {paying && (
+        <Modal title="Enviar comprovativo de pagamento" onClose={() => setPaying(false)}>
+          <form
+            className="stack"
+            onSubmit={(e) => {
+              e.preventDefault()
+              post('/payment-proof', { form: formWith(null, 'proof', proofFile) })
+              setProofFile(null)
+              setPaying(false)
+            }}
+          >
+            <p className="muted">Sem o comprovativo o processo não avança. As Finanças verificam o pagamento e enviam a fatura recibo.</p>
+            <Field label="Comprovativo de pagamento (PDF ou imagem)">
+              <input type="file" accept="application/pdf,image/png,image/jpeg" onChange={(e) => setProofFile(e.target.files[0])} required />
+            </Field>
+            <div className="actions">
+              <button type="button" onClick={() => setPaying(false)}>
+                Voltar
+              </button>
+              <button className="primary">Enviar comprovativo</button>
+            </div>
+          </form>
+        </Modal>
+      )}
+      {reviewing && (
+        <Modal title={`Verificar pagamento — ${p.reference}`} onClose={() => setReviewing(false)} wide="xl">
+          <div className="compare">
+            <div>
+              <h3>Comprovativo do transitário</h3>
+              {proofDoc && <DocumentPane path={documentPath(proofDoc)} name={proofDoc.originalName} />}
+            </div>
+            <div>
+              <h3>Proforma</h3>
+              {proformaDoc && <DocumentPane path={documentPath(proformaDoc)} name={proformaDoc.originalName} />}
+            </div>
+          </div>
+          <div className="stack">
+            <Field label="Motivo (obrigatório para recusar o comprovativo)">
+              <input value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={500} />
+            </Field>
+            <div className="actions">
+              <button disabled={!notes.trim()} onClick={reject}>
+                Recusar comprovativo
+              </button>
+              <button
+                className="primary"
+                onClick={() => {
+                  post('/confirm-payment', { body: {} })
+                  setReviewing(false)
+                }}
+              >
+                Confirmar pagamento
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
       {dialog && (
         <Modal title={DIALOGS[dialog].title} onClose={() => setDialog(null)}>
           <form className="stack" onSubmit={submitDialog}>

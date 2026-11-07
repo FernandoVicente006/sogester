@@ -82,9 +82,9 @@ export const PROCESS_STATUS_LABELS = {
   DOCUMENTOS_PENDENTES: 'Documentos pendentes',
   DOCUMENTOS_SUBMETIDOS: 'Documentos submetidos',
   EM_PROCESSAMENTO_INTERNO: 'Em processamento interno',
-  PAGAMENTO_PENDENTE: 'Pagamento pendente',
-  PAGAMENTO_SUBMETIDO: 'Pagamento submetido',
-  PAGAMENTO_CONFIRMADO: 'Pagamento confirmado',
+  PAGAMENTO_PENDENTE: 'Pendente de pagamento',
+  PAGAMENTO_SUBMETIDO: 'Pagamento em análise',
+  PAGAMENTO_CONFIRMADO: 'Aguarda recibo',
   CONCLUIDO: 'Concluído',
   CANCELADO: 'Cancelado',
 }
@@ -135,7 +135,7 @@ export function Modal({ title, onClose, wide, children }) {
   }, [onClose])
   return (
     <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className={wide ? 'modal wide' : 'modal'} role="dialog" aria-modal="true" aria-label={title}>
+      <div className={wide === 'xl' ? 'modal wide xl' : wide ? 'modal wide' : 'modal'} role="dialog" aria-modal="true" aria-label={title}>
         <header>
           <h2>{title}</h2>
           <button className="icon-btn" style={{ color: 'var(--muted)' }} onClick={onClose} aria-label="Fechar">

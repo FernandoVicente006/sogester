@@ -4,11 +4,14 @@ import { api, errorText } from '../api.js'
 import { useAuth } from '../auth.jsx'
 import { Empty, ErrorBox, Icon, PRIORITY_LABELS, PROCESS_STATUS_LABELS, PageHeader, ProcessBadge, SearchInput, formatDate } from '../components/ui.jsx'
 
+const PAYMENT_QUEUE = 'PAGAMENTO_SUBMETIDO,PAGAMENTO_CONFIRMADO,PAGAMENTO_PENDENTE'
+
 export default function Processes() {
   const { user } = useAuth()
   const isForwarder = user.role === 'TRANSITARIO'
   const [params, setParams] = useSearchParams()
-  const status = params.get('status') ?? ''
+  const isFinance = user.role === 'FINANCAS'
+  const status = params.get('status') ?? (isFinance ? PAYMENT_QUEUE : '')
   const [items, setItems] = useState([])
   const [q, setQ] = useState('')
   const [error, setError] = useState('')
@@ -36,8 +39,8 @@ export default function Processes() {
   return (
     <>
       <PageHeader
-        title={isForwarder ? 'Os meus processos' : 'Fila de processos'}
-        subtitle={isForwarder ? 'Todos os processos submetidos por si.' : 'Ordem: urgência pedida, tipo de carga e ordem de chegada.'}
+        title={isForwarder ? 'Os meus processos' : isFinance ? 'Fila de pagamentos' : 'Fila de processos'}
+        subtitle={isForwarder ? 'Todos os processos submetidos por si.' : isFinance ? 'Comprovativos por validar, recibos por enviar e pagamentos pendentes.' : 'Ordem: urgência pedida, tipo de carga e ordem de chegada.'}
       >
         {isForwarder && (
           <Link to="/processos/novo" className="button primary">
@@ -50,9 +53,10 @@ export default function Processes() {
         <SearchInput value={q} onChange={setQ} placeholder="Pesquisar referência, cliente, documento ou transitário" />
         <select
           value={status}
-          onChange={(e) => setParams(e.target.value ? { status: e.target.value } : {})}
+          onChange={(e) => setParams(e.target.value || isFinance ? { status: e.target.value } : {})}
           aria-label="Filtrar por estado"
         >
+          {isFinance && <option value={PAYMENT_QUEUE}>Fila de pagamentos</option>}
           <option value="">Todos os estados</option>
           {Object.entries(PROCESS_STATUS_LABELS).map(([k, v]) => (
             <option key={k} value={k}>

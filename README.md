@@ -34,7 +34,8 @@ Camada digital entre transitários e a Sogester (terminais de Cabinda, Soyo e Lu
 
 Fluxo em vigor: a Loja analisa (EM_ANALISE), marca os documentos como conformes (EM_PROCESSAMENTO_INTERNO) e carrega a
 proforma gerada no sistema de faturação da Sogester; o transitário envia o comprovativo; as Finanças de processos validam
-e carregam a fatura recibo, e o processo conclui-se sozinho. A plataforma não emite documentos fiscais: guarda e entrega
+e carregam a fatura recibo, e o processo conclui-se sozinho. As Finanças têm fila própria e comparam o comprovativo com a
+proforma lado a lado; o transitário vê e descarrega os documentos e só avança com o comprovativo («Já paguei»). A plataforma não emite documentos fiscais: guarda e entrega
 os ficheiros, e só o ficheiro é obrigatório (número, valor, entidade e referência são opcionais; proformas sem valor
 ficam fora dos totais de receita). A saída antecipada é uma exceção paralela: não muda o estado do processo, é emitida
 pelo administrador ou pelo Chefe comercial, exige compromisso assinado (palavra-passe) e o prazo

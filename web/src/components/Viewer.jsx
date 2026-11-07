@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import { errorText, fetchBlob } from '../api.js'
-import { Modal } from './ui.jsx'
+import { Icon, Modal } from './ui.jsx'
 
-/** Visualizador embutido de PDFs e imagens privados (sem descarregar para o disco). */
-export default function Viewer({ path, name, onClose }) {
+/** Mostra um PDF ou imagem privados e oferece o download, sem expor um link público. */
+export function DocumentPane({ path, name }) {
   const [file, setFile] = useState(null) // { url, type }
   const [error, setError] = useState('')
 
@@ -24,16 +24,27 @@ export default function Viewer({ path, name, onClose }) {
   }, [path])
 
   return (
-    <Modal title={name} onClose={onClose} wide>
+    <div className="document-pane">
       {error && <p className="error">{error}</p>}
       {!file && !error && <p className="muted">A carregar…</p>}
       {file?.type.startsWith('image/') && <img className="viewer-img" src={file.url} alt={name} />}
       {file?.type === 'application/pdf' && <iframe className="viewer-pdf" src={file.url} title={name} />}
-      {file && !file.type.startsWith('image/') && file.type !== 'application/pdf' && (
-        <a href={file.url} download={name}>
-          Descarregar {name}
-        </a>
+      {file && (
+        <div className="document-actions">
+          <span className="muted small">{name}</span>
+          <a className="button" href={file.url} download={name}>
+            <Icon name="download" /> Descarregar
+          </a>
+        </div>
       )}
+    </div>
+  )
+}
+
+export default function Viewer({ path, name, onClose }) {
+  return (
+    <Modal title={name} onClose={onClose} wide>
+      <DocumentPane path={path} name={name} />
     </Modal>
   )
 }
