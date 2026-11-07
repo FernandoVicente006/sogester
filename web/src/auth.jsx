@@ -9,7 +9,9 @@ export const ROLE_LABELS = {
   ADMIN_ENTIDADE: 'Administrador da entidade',
   LOJA: 'Loja',
   CADASTRO: 'Cadastro',
-  FATURACAO: 'Faturação',
+  FINANCAS: 'Finanças de processos',
+  CHEFE_COMERCIAL: 'Chefe comercial',
+  PORTARIA: 'Portaria',
   TRANSITARIO: 'Transitário',
 }
 

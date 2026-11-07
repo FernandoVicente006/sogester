@@ -7,13 +7,13 @@ import Viewer from '../components/Viewer.jsx'
 import { ErrorBox, Field, Icon, Modal, PRIORITY_LABELS, PROCESS_STATUS_LABELS, ProcessBadge, formatDate } from '../components/ui.jsx'
 
 // Fases do ciclo de vida para o indicador de progresso (cada fase agrupa vários estados).
-const PHASES = ['Submetido', 'Análise', 'Autorização', 'Pagamento', 'Concluído']
+const PHASES = ['Submetido', 'Análise', 'Processamento', 'Pagamento', 'Concluído']
 const PHASE_OF = {
   SUBMETIDO: 0,
   EM_ANALISE: 1,
   DOCUMENTOS_PENDENTES: 1,
   DOCUMENTOS_SUBMETIDOS: 1,
-  AUTORIZACAO_EMITIDA: 2,
+  EM_PROCESSAMENTO_INTERNO: 2,
   PAGAMENTO_PENDENTE: 3,
   PAGAMENTO_SUBMETIDO: 3,
   PAGAMENTO_CONFIRMADO: 3,
@@ -53,33 +53,39 @@ const DOC_LABELS = {
   COMPROVATIVO: 'Comprovativo de pagamento',
   FATURA_RECIBO: 'Fatura recibo',
 }
-const PRE_AUTHORIZATION = ['SUBMETIDO', 'EM_ANALISE', 'DOCUMENTOS_PENDENTES', 'DOCUMENTOS_SUBMETIDOS']
-const AUTHORIZERS = ['SUPER_ADMIN', 'ADMIN_ENTIDADE', 'LOJA']
-const BILLERS = ['SUPER_ADMIN', 'ADMIN_ENTIDADE', 'FATURACAO']
+const SIGNABLE = ['SUBMETIDO', 'EM_ANALISE', 'DOCUMENTOS_PENDENTES', 'DOCUMENTOS_SUBMETIDOS', 'EM_PROCESSAMENTO_INTERNO']
+const AUTHORIZERS = ['SUPER_ADMIN', 'ADMIN_ENTIDADE', 'CHEFE_COMERCIAL']
+const PROFORMA_UPLOADERS = ['SUPER_ADMIN', 'ADMIN_ENTIDADE', 'LOJA']
+const FINANCE = ['SUPER_ADMIN', 'ADMIN_ENTIDADE', 'FINANCAS']
 const money = (amount, currency) => new Intl.NumberFormat('pt-AO', { style: 'currency', currency }).format(amount)
+// Processos antigos ainda têm este estado no histórico.
+const historyLabel = (status) => (status === 'AUTORIZACAO_EMITIDA' ? 'Autorização emitida' : (PROCESS_STATUS_LABELS[status] ?? status))
+/** Só envia os campos preenchidos: na proforma e no recibo apenas o ficheiro é obrigatório. */
+const filled = (data) => Object.fromEntries(Object.entries(data).filter(([, v]) => v !== '' && v != null))
 const VOLUME_LABELS = { ALTO: 'Alto', CARGA_GRANEL: 'Carga granel', CARGA_GERAL: 'Carga geral', CONTENTOR: 'Contentor' }
 
 // Transições que a Sogester pode fazer a partir de cada estado (espelha o servidor).
 const STAFF_ACTIONS = {
   SUBMETIDO: [['EM_ANALISE', 'Iniciar análise'], ['REJEITADO', 'Rejeitar']],
-  EM_ANALISE: [['DOCUMENTOS_PENDENTES', 'Pedir documentos'], ['REJEITADO', 'Rejeitar']],
+  EM_ANALISE: [['EM_PROCESSAMENTO_INTERNO', 'Documentos conformes'], ['DOCUMENTOS_PENDENTES', 'Pedir documentos'], ['REJEITADO', 'Rejeitar']],
   DOCUMENTOS_PENDENTES: [['REJEITADO', 'Rejeitar (sem resposta)']],
-  DOCUMENTOS_SUBMETIDOS: [['EM_ANALISE', 'Voltar à análise'], ['DOCUMENTOS_PENDENTES', 'Pedir documentos'], ['REJEITADO', 'Rejeitar']],
+  DOCUMENTOS_SUBMETIDOS: [['EM_PROCESSAMENTO_INTERNO', 'Documentos conformes'], ['EM_ANALISE', 'Voltar à análise'], ['DOCUMENTOS_PENDENTES', 'Pedir documentos'], ['REJEITADO', 'Rejeitar']],
+  EM_PROCESSAMENTO_INTERNO: [['DOCUMENTOS_PENDENTES', 'Pedir documentos'], ['REJEITADO', 'Rejeitar']],
 }
 const NOTES_REQUIRED = ['DOCUMENTOS_PENDENTES', 'REJEITADO']
 const REVIEWERS = ['SUPER_ADMIN', 'ADMIN_ENTIDADE', 'LOJA']
 
 const PRE_AUTH = ['SUBMETIDO', 'EM_ANALISE', 'DOCUMENTOS_PENDENTES', 'DOCUMENTOS_SUBMETIDOS']
-const POST_AUTH = ['AUTORIZACAO_EMITIDA', 'PAGAMENTO_PENDENTE', 'PAGAMENTO_SUBMETIDO']
+const POST_AUTH = ['EM_PROCESSAMENTO_INTERNO', 'PAGAMENTO_PENDENTE', 'PAGAMENTO_SUBMETIDO']
 const ADMINS = ['SUPER_ADMIN', 'ADMIN_ENTIDADE']
-const CANCEL_DECIDERS = ['SUPER_ADMIN', 'ADMIN_ENTIDADE', 'FATURACAO']
+const CANCEL_DECIDERS = ['SUPER_ADMIN', 'ADMIN_ENTIDADE', 'FINANCAS']
 
 // Cada ação com motivo obrigatório: título, rótulo do campo, endpoint e se é destrutiva.
 const DIALOGS = {
   withdraw: { title: 'Cancelar processo', label: 'Motivo do cancelamento', path: '/cancellation', confirm: 'Cancelar processo', danger: true, hint: 'O processo será cancelado de imediato.' },
   request: { title: 'Pedir cancelamento', label: 'Motivo do pedido', path: '/cancellation', confirm: 'Enviar pedido', hint: 'A Sogester analisa o pedido e decide. O processo mantém-se até lá.' },
   staffCancel: { title: 'Cancelar processo', label: 'Motivo do cancelamento', path: '/cancel', confirm: 'Cancelar processo', danger: true, hint: 'O transitário será informado.' },
-  revoke: { title: 'Revogar autorização', label: 'Motivo da revogação', path: '/authorization/revoke', confirm: 'Revogar autorização', danger: true, hint: 'O código deixa de ser válido e o processo volta à análise.' },
+  revoke: { title: 'Revogar autorização', label: 'Motivo da revogação', path: '/authorization/revoke', confirm: 'Revogar autorização', danger: true, hint: 'O código deixa de ser válido e o prazo de pagamento é retirado.' },
   extend: { title: 'Prorrogar prazo de pagamento', label: 'Justificação', path: '/extend-deadline', confirm: 'Prorrogar', days: true, hint: 'Máximo de 2 prorrogações por compromisso, até 7 dias cada.' },
   reopen: { title: 'Reabrir processo', label: 'Motivo da reabertura', path: '/reopen', confirm: 'Reabrir', hint: 'O processo volta à análise.' },
 }
@@ -117,7 +123,7 @@ export default function ProcessDetail() {
   }, [id, run])
 
   const needsCommitment =
-    user.role === 'TRANSITARIO' && p?.cargoPriority === 'PERECIVEL' && !p.hasCommitment && PRE_AUTHORIZATION.includes(p.status)
+    user.role === 'TRANSITARIO' && p?.cargoPriority === 'PERECIVEL' && !p.hasCommitment && SIGNABLE.includes(p.status)
   useEffect(() => {
     if (!needsCommitment) return
     api('GET', `/processes/${id}/commitment-terms`)
@@ -129,12 +135,13 @@ export default function ProcessDetail() {
 
   const isForwarder = user.role === 'TRANSITARIO'
   const actions = REVIEWERS.includes(user.role) ? (STAFF_ACTIONS[p.status] ?? []) : []
-  const canAuthorize = AUTHORIZERS.includes(user.role) && ['EM_ANALISE', 'DOCUMENTOS_SUBMETIDOS'].includes(p.status)
-  const isBiller = BILLERS.includes(user.role)
+  const canAuthorize = AUTHORIZERS.includes(user.role) && ['EM_ANALISE', 'DOCUMENTOS_SUBMETIDOS', 'EM_PROCESSAMENTO_INTERNO'].includes(p.status) && p.hasCommitment && !p.authorization
+  const canUploadProforma = PROFORMA_UPLOADERS.includes(user.role)
+  const isFinance = FINANCE.includes(user.role)
   const earlyRelease = p.authorization?.type === 'SAIDA_ANTECIPADA'
   const exceptionActions = [
     (PRE_AUTH.includes(p.status) || POST_AUTH.includes(p.status)) && p.status !== 'PAGAMENTO_SUBMETIDO' && !earlyRelease && ['staffCancel', 'Cancelar processo'],
-    p.status === 'AUTORIZACAO_EMITIDA' && p.authorization?.type === 'PADRAO' && ['revoke', 'Revogar autorização'],
+    p.authorization && (PRE_AUTH.includes(p.status) || POST_AUTH.includes(p.status)) && ['revoke', 'Revogar autorização'],
     p.commitment?.dueAt && p.commitment.extensionsLeft > 0 && !['PAGAMENTO_CONFIRMADO', 'CONCLUIDO', 'CANCELADO'].includes(p.status) && ['extend', 'Prorrogar prazo de pagamento'],
     p.status === 'REJEITADO' && ['reopen', 'Reabrir processo'],
   ].filter(Boolean)
@@ -259,8 +266,7 @@ export default function ProcessDetail() {
         <section className="card stack">
           <h3><Icon name="shield" /> Compromisso de pagamento</h3>
           <p className="muted">
-            Carga perecível: para a Sogester emitir a autorização de saída sem esperar todo o ciclo de faturação, assine o
-            compromisso abaixo.
+            Para a Sogester poder emitir a saída antecipada da carga, assine o compromisso abaixo.
           </p>
           <blockquote className="terms">{terms.text}</blockquote>
           <form
@@ -297,23 +303,11 @@ export default function ProcessDetail() {
 
       {canAuthorize && (
         <section className="card stack">
-          <h3><Icon name="shield" /> Autorização digital</h3>
-          {p.cargoPriority === 'PERECIVEL' && !p.hasCommitment ? (
-            <p className="muted">Carga perecível: aguarda o compromisso de pagamento assinado pelo transitário.</p>
-          ) : (
-            <p className="muted">
-              {p.cargoPriority === 'PERECIVEL'
-                ? 'Emite a autorização de saída antecipada (compromisso assinado).'
-                : 'Documentação conforme: emite o termo de autorização para avançar para a faturação.'}
-            </p>
-          )}
+          <h3><Icon name="shield" /> Saída antecipada</h3>
+          <p className="muted">Exceção: autoriza a saída da carga antes do pagamento, com o compromisso já assinado pelo transitário.</p>
           <div>
-            <button
-              className="primary"
-              disabled={p.cargoPriority === 'PERECIVEL' && !p.hasCommitment}
-              onClick={() => post('/authorization', { body: {} })}
-            >
-              Enviar aprovação digital
+            <button className="primary" onClick={() => post('/authorization', { body: {} })}>
+              Emitir saída antecipada
             </button>
           </div>
         </section>
@@ -321,7 +315,7 @@ export default function ProcessDetail() {
 
       {p.authorization && (
         <section className="card">
-          <h3><Icon name="shield" /> Autorização digital</h3>
+          <h3><Icon name="shield" /> {p.authorization.type === 'SAIDA_ANTECIPADA' ? 'Saída antecipada' : 'Autorização digital'}</h3>
           <dl className="details">
             {row('Código', <code>{p.authorization.code}</code>)}
             {row('Tipo', p.authorization.type === 'SAIDA_ANTECIPADA' ? 'Saída antecipada (compromisso de pagamento)' : 'Padrão')}
@@ -334,38 +328,39 @@ export default function ProcessDetail() {
         </section>
       )}
 
-      {isBiller && p.status === 'AUTORIZACAO_EMITIDA' && (
+      {canUploadProforma && p.status === 'EM_PROCESSAMENTO_INTERNO' && (
         <section className="card">
-          <h3><Icon name="card" /> Emitir proforma</h3>
+          <h3><Icon name="card" /> Carregar proforma</h3>
+          <p className="muted">Só o ficheiro é obrigatório: os outros dados já estão no documento.</p>
           <form
             className="stack"
             onSubmit={(e) => {
               e.preventDefault()
               const { file, amount, ...rest } = proforma
-              post('/proforma', { form: formWith({ ...rest, amount: Number(amount) }, 'proforma', file) })
+              post('/proforma', { form: formWith(filled({ ...rest, amount: amount === '' ? null : Number(amount) }), 'proforma', file) })
             }}
           >
             <div className="row">
-              <Field label="N.º da proforma">
-                <input value={proforma.number} onChange={(e) => setProforma({ ...proforma, number: e.target.value })} required />
+              <Field label="N.º da proforma (opcional)">
+                <input value={proforma.number} onChange={(e) => setProforma({ ...proforma, number: e.target.value })} />
               </Field>
-              <Field label="Valor (AOA)">
-                <input type="number" min="0" step="0.01" value={proforma.amount} onChange={(e) => setProforma({ ...proforma, amount: e.target.value })} required />
+              <Field label="Valor em AOA (opcional)">
+                <input type="number" min="0" step="0.01" value={proforma.amount} onChange={(e) => setProforma({ ...proforma, amount: e.target.value })} />
               </Field>
             </div>
             <div className="row">
-              <Field label="Entidade de pagamento">
-                <input value={proforma.paymentEntity} onChange={(e) => setProforma({ ...proforma, paymentEntity: e.target.value })} required />
+              <Field label="Entidade de pagamento (opcional)">
+                <input value={proforma.paymentEntity} onChange={(e) => setProforma({ ...proforma, paymentEntity: e.target.value })} />
               </Field>
-              <Field label="Referência de pagamento">
-                <input value={proforma.paymentReference} onChange={(e) => setProforma({ ...proforma, paymentReference: e.target.value })} required />
+              <Field label="Referência de pagamento (opcional)">
+                <input value={proforma.paymentReference} onChange={(e) => setProforma({ ...proforma, paymentReference: e.target.value })} />
               </Field>
             </div>
             <Field label="Ficheiro da proforma (PDF ou imagem)">
               <input type="file" accept="application/pdf,image/png,image/jpeg" onChange={(e) => setProforma({ ...proforma, file: e.target.files[0] })} required />
             </Field>
             <div>
-              <button className="primary">Emitir proforma</button>
+              <button className="primary">Enviar proforma ao transitário</button>
             </div>
           </form>
         </section>
@@ -373,12 +368,13 @@ export default function ProcessDetail() {
 
       {p.invoice && (
         <section className="card">
-          <h3><Icon name="card" /> Faturação</h3>
+          <h3><Icon name="card" /> Pagamento</h3>
           <dl className="details">
-            {row('Proforma', p.invoice.proformaNumber)}
-            {row('Valor', money(p.invoice.amount, p.invoice.currency))}
-            {row('Entidade de pagamento', p.invoice.paymentEntity)}
-            {row('Referência', <code>{p.invoice.paymentReference}</code>)}
+            {row('Proforma carregada', formatDate(p.invoice.proformaIssuedAt))}
+            {p.invoice.proformaNumber && row('N.º da proforma', p.invoice.proformaNumber)}
+            {p.invoice.amount != null && row('Valor', money(p.invoice.amount, p.invoice.currency))}
+            {p.invoice.paymentEntity && row('Entidade de pagamento', p.invoice.paymentEntity)}
+            {p.invoice.paymentReference && row('Referência', <code>{p.invoice.paymentReference}</code>)}
             {p.invoice.proofSubmittedAt && row('Comprovativo enviado', formatDate(p.invoice.proofSubmittedAt))}
             {p.invoice.paymentConfirmedAt && row('Pagamento confirmado', formatDate(p.invoice.paymentConfirmedAt))}
             {p.invoice.receiptNumber && row('Fatura recibo', p.invoice.receiptNumber)}
@@ -401,7 +397,7 @@ export default function ProcessDetail() {
             </form>
           )}
 
-          {isBiller && p.status === 'PAGAMENTO_SUBMETIDO' && (
+          {isFinance && p.status === 'PAGAMENTO_SUBMETIDO' && (
             <div className="stack">
               <Field label="Motivo (obrigatório para recusar o comprovativo)">
                 <input value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={500} />
@@ -423,24 +419,24 @@ export default function ProcessDetail() {
             </div>
           )}
 
-          {isBiller && p.status === 'PAGAMENTO_CONFIRMADO' && (
+          {isFinance && p.status === 'PAGAMENTO_CONFIRMADO' && (
             <form
               className="stack"
               onSubmit={(e) => {
                 e.preventDefault()
-                post('/receipt', { form: formWith({ number: receipt.number }, 'receipt', receipt.file) })
+                post('/receipt', { form: formWith(filled({ number: receipt.number }), 'receipt', receipt.file) })
               }}
             >
               <div className="row">
-                <Field label="N.º da fatura recibo">
-                  <input value={receipt.number} onChange={(e) => setReceipt({ ...receipt, number: e.target.value })} required />
+                <Field label="N.º da fatura recibo (opcional)">
+                  <input value={receipt.number} onChange={(e) => setReceipt({ ...receipt, number: e.target.value })} />
                 </Field>
                 <Field label="Ficheiro (PDF ou imagem)">
                   <input type="file" accept="application/pdf,image/png,image/jpeg" onChange={(e) => setReceipt({ ...receipt, file: e.target.files[0] })} required />
                 </Field>
               </div>
               <div>
-                <button className="primary">Emitir fatura recibo e concluir</button>
+                <button className="primary">Enviar fatura recibo e concluir</button>
               </div>
             </form>
           )}
@@ -594,7 +590,7 @@ export default function ProcessDetail() {
         <ol className="history">
           {p.history.map((h, i) => (
             <li key={i}>
-              <strong>{PROCESS_STATUS_LABELS[h.toStatus]}</strong>
+              <strong>{historyLabel(h.toStatus)}</strong>
               <div className="muted small">
                 {h.changedBy} · {formatDate(h.createdAt)}
               </div>

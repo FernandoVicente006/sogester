@@ -5,9 +5,9 @@ import { audit } from './audit.js';
 import { notifyProcessEvent } from './notifications.js';
 import { MAX_EXTENSIONS, changeStatus, getProcess, loadAccessible } from './processes.js';
 
-/** Antes da autorização o transitário desiste sozinho; depois, só com decisão da Sogester. */
-const PRE_AUTHORIZATION = ['SUBMETIDO', 'EM_ANALISE', 'DOCUMENTOS_PENDENTES', 'DOCUMENTOS_SUBMETIDOS'];
-const POST_AUTHORIZATION = ['AUTORIZACAO_EMITIDA', 'PAGAMENTO_PENDENTE', 'PAGAMENTO_SUBMETIDO'];
+/** Até os documentos estarem conformes o transitário desiste sozinho; depois, só com decisão da Sogester. */
+const BEFORE_APPROVAL = ['SUBMETIDO', 'EM_ANALISE', 'DOCUMENTOS_PENDENTES', 'DOCUMENTOS_SUBMETIDOS'];
+const AFTER_APPROVAL = ['EM_PROCESSAMENTO_INTERNO', 'PAGAMENTO_PENDENTE', 'PAGAMENTO_SUBMETIDO'];
 const PAID = ['PAGAMENTO_CONFIRMADO', 'CONCLUIDO'];
 
 const activeAuthorization = (processId) =>
@@ -27,13 +27,14 @@ const closeProcess = async (conn, actor, process, notes) => {
 
 // ---- cancelamento -------------------------------------------------------------------------
 /**
- * Transitário: cancela de imediato antes da autorização; depois dela cria um pedido para a Sogester decidir.
+ * Transitário: cancela de imediato enquanto os documentos estão em análise; depois cria um pedido para a Sogester decidir.
  */
 export async function cancelOrRequest(actor, id, { reason }) {
   if (!isForwarder(actor)) throw forbidden();
   const process = await loadAccessible(actor, id);
+  await assertNotEarlyRelease(id);
 
-  if (PRE_AUTHORIZATION.includes(process.status)) {
+  if (BEFORE_APPROVAL.includes(process.status)) {
     await withTransaction(async (conn) => {
       await closeProcess(conn, actor, process, reason);
       await audit(actor, 'PROCESS_WITHDRAWN', 'process', id, { entityId: process.entityId, details: { reason }, conn });
@@ -42,10 +43,9 @@ export async function cancelOrRequest(actor, id, { reason }) {
     return getProcess(actor, id);
   }
 
-  if (!POST_AUTHORIZATION.includes(process.status)) {
+  if (!AFTER_APPROVAL.includes(process.status)) {
     throw conflict('Este processo já não pode ser cancelado', 'NOT_CANCELLABLE');
   }
-  await assertNotEarlyRelease(id);
   if (await queryOne("SELECT id FROM cancellation_requests WHERE process_id = ? AND status = 'PENDENTE'", [id])) {
     throw conflict('Já existe um pedido de cancelamento pendente', 'ALREADY_REQUESTED');
   }
@@ -67,7 +67,7 @@ export async function decideCancellation(actor, id, { approve, notes }) {
     if (process.status === 'PAGAMENTO_SUBMETIDO') {
       throw conflict('Há um comprovativo por validar: confirme ou recuse o pagamento antes de cancelar', 'PAYMENT_UNDER_REVIEW');
     }
-    if (!POST_AUTHORIZATION.includes(process.status)) throw conflict('Este processo já não pode ser cancelado', 'NOT_CANCELLABLE');
+    if (!AFTER_APPROVAL.includes(process.status)) throw conflict('Este processo já não pode ser cancelado', 'NOT_CANCELLABLE');
     await assertNotEarlyRelease(id);
   } else if (!notes) {
     throw badRequest('Indique o motivo da recusa', 'NOTES_REQUIRED');
@@ -97,7 +97,7 @@ export async function staffCancel(actor, id, { reason }) {
   if (process.status === 'PAGAMENTO_SUBMETIDO') {
     throw conflict('Há um comprovativo por validar: confirme ou recuse o pagamento antes de cancelar', 'PAYMENT_UNDER_REVIEW');
   }
-  if (![...PRE_AUTHORIZATION, ...POST_AUTHORIZATION].includes(process.status)) {
+  if (![...BEFORE_APPROVAL, ...AFTER_APPROVAL].includes(process.status)) {
     throw conflict('Este processo já não pode ser cancelado', 'NOT_CANCELLABLE');
   }
   await assertNotEarlyRelease(id);
@@ -115,19 +115,18 @@ export async function staffCancel(actor, id, { reason }) {
 }
 
 // ---- exceções do administrador --------------------------------------------------------------
-/** Revoga uma autorização ainda sem proforma: o código deixa de ser válido e o processo volta à análise. */
+/** Revoga a saída antecipada: o código deixa de ser válido, o prazo cai e o processo segue o fluxo normal. */
 export async function revokeAuthorization(actor, id, { reason }) {
   const process = await loadAccessible(actor, id);
-  if (process.status !== 'AUTORIZACAO_EMITIDA') {
-    throw conflict('Só se revoga a autorização antes de emitir a proforma', 'INVALID_TRANSITION');
+  if (![...BEFORE_APPROVAL, ...AFTER_APPROVAL].includes(process.status)) {
+    throw conflict('Já não é possível revogar a autorização deste processo', 'INVALID_TRANSITION');
   }
   const auth = await activeAuthorization(id);
   if (!auth) throw conflict('Não há autorização ativa', 'NO_AUTHORIZATION');
-  await assertNotEarlyRelease(id);
 
   await withTransaction(async (conn) => {
     await conn.query('UPDATE authorizations SET revoked_at = NOW(), revoked_by = ?, revoke_reason = ? WHERE id = ?', [actor.id, reason, auth.id]);
-    await changeStatus(actor, process, 'EM_ANALISE', `Autorização revogada: ${reason}`, conn);
+    await conn.query('UPDATE payment_commitments SET due_at = NULL, reminder_sent_at = NULL, overdue_notified_at = NULL WHERE process_id = ?', [id]);
     await audit(actor, 'AUTHORIZATION_REVOKED', 'process', id, { entityId: process.entityId, details: { reason }, conn });
   });
   await notifyProcessEvent('AUTHORIZATION_REVOKED', process, { actor, notes: reason });

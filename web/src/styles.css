@@ -141,7 +141,7 @@ td.chips span { display: inline-flex; gap: .35rem; align-items: center; margin-r
 .badge { display: inline-flex; align-items: center; gap: .4rem; font-size: .75rem; font-weight: 600; padding: .18rem .65rem; border-radius: 999px; background: var(--info-100); color: var(--brand); white-space: nowrap; }
 .badge::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .badge-PENDENTE, .pbadge-DOCUMENTOS_PENDENTES, .pbadge-PAGAMENTO_PENDENTE { background: var(--warning-100); color: var(--warning); }
-.badge-APROVADO, .pbadge-CONCLUIDO, .pbadge-PAGAMENTO_CONFIRMADO, .pbadge-AUTORIZACAO_EMITIDA { background: var(--success-100); color: var(--success); }
+.badge-APROVADO, .pbadge-CONCLUIDO, .pbadge-PAGAMENTO_CONFIRMADO, .pbadge-EM_PROCESSAMENTO_INTERNO { background: var(--success-100); color: var(--success); }
 .badge-REJEITADO, .badge-SUSPENSO, .pbadge-REJEITADO { background: var(--danger-100); color: var(--danger); }
 .pbadge-PAGAMENTO_SUBMETIDO, .pbadge-DOCUMENTOS_SUBMETIDOS { background: #ede9fe; color: #5b3fb5; }
 .tag { display: inline-flex; align-items: center; gap: .3rem; font-size: .72rem; font-weight: 600; padding: .12rem .5rem; border-radius: 6px; background: #f1f5f9; color: #475569; margin-right: .35rem; }

@@ -83,11 +83,12 @@ test('cancelamento de processos e exceções após a autorização', async () =>
     headers: setupHeaders,
   });
   const admin = await login('dir@cabinda.ao', 'Senha1234');
-  for (const [name, role] of [['Loja', 'LOJA'], ['Fat', 'FATURACAO']]) {
+  for (const [name, role] of [['Loja', 'LOJA'], ['Fat', 'FINANCAS'], ['Chefe', 'CHEFE_COMERCIAL']]) {
     await api('POST', '/users', { token: admin, body: { name, email: `${role.toLowerCase()}@cabinda.ao`, password: 'Senha1234', role } });
   }
   const loja = await login('loja@cabinda.ao', 'Senha1234');
-  const fat = await login('faturacao@cabinda.ao', 'Senha1234');
+  const fat = await login('financas@cabinda.ao', 'Senha1234');
+  const chefe = await login('chefe_comercial@cabinda.ao', 'Senha1234');
 
   const mkForwarder = async (n) => {
     const r = await api('POST', '/forwarders', {
@@ -118,18 +119,18 @@ test('cancelamento de processos e exceções após a autorização', async () =>
   const code = async (token, id, path, body) => (await post(token, id, path, body)).body?.error?.code;
   const get = async (token, id) => (await api('GET', `/processes/${id}`, { token })).body.process;
   const inbox = async (token) => (await api('GET', '/notifications', { token })).body.notifications.map((n) => n.type);
-  const authorize = async (id) => {
+  const approve = async (id) => {
     await ok(loja, id, '/transition', { status: 'EM_ANALISE' });
-    return ok(loja, id, '/authorization', {}, 201);
+    return ok(loja, id, '/transition', { status: 'EM_PROCESSAMENTO_INTERNO' });
   };
   const proforma = (id) =>
     api('POST', `/processes/${id}/proforma`, {
-      token: fat,
+      token: loja,
       form: file('proforma', { number: 'PF-1', amount: 1000, paymentEntity: '11111', paymentReference: '123456789' }),
     });
   const proof = (id) => api('POST', `/processes/${id}/payment-proof`, { token: fwdA, form: file('proof') });
 
-  // =========== cancelamento direto antes da autorização ===========
+  // =========== cancelamento direto enquanto os documentos estão em análise ===========
   const p1 = await submit(fwdA);
   assert.equal(await code(fwdA, p1.id, '/cancellation', { reason: 'abc' }), 'VALIDATION_ERROR', 'motivo curto');
   assert.equal((await post(fwdB, p1.id, '/cancellation', { reason: 'Não é meu processo' })).status, 404);
@@ -146,11 +147,11 @@ test('cancelamento de processos e exceções após a autorização', async () =>
   assert.equal((await api('GET', '/processes/stats', { token: loja })).body.stats.cancelled, 1);
   assert.equal((await api('GET', '/processes/stats', { token: loja })).body.stats.active, 0);
 
-  // =========== pedido de cancelamento depois da autorização ===========
+  // =========== pedido de cancelamento depois de os documentos estarem conformes ===========
   const p2 = await submit(fwdA);
-  await authorize(p2.id);
+  await approve(p2.id);
   const requested = await ok(fwdA, p2.id, '/cancellation', { reason: 'O cliente cancelou o negócio' });
-  assert.equal(requested.status, 'AUTORIZACAO_EMITIDA', 'o processo só muda quando a Sogester decide');
+  assert.equal(requested.status, 'EM_PROCESSAMENTO_INTERNO', 'o processo só muda quando a Sogester decide');
   assert.equal(requested.cancellationRequest.status, 'PENDENTE');
   assert.equal(await code(fwdA, p2.id, '/cancellation', { reason: 'Pedido repetido' }), 'ALREADY_REQUESTED');
   for (const t of [admin, fat]) assert.ok((await inbox(t)).includes('CANCELLATION_REQUESTED'));
@@ -160,7 +161,7 @@ test('cancelamento de processos e exceções após a autorização', async () =>
   assert.equal((await post(fwdA, p2.id, '/cancellation/decision', { approve: true })).status, 403);
   assert.equal(await code(fat, p2.id, '/cancellation/decision', { approve: false }), 'NOTES_REQUIRED');
   const denied = await ok(fat, p2.id, '/cancellation/decision', { approve: false, notes: 'A mercadoria já está no porto' });
-  assert.equal(denied.status, 'AUTORIZACAO_EMITIDA');
+  assert.equal(denied.status, 'EM_PROCESSAMENTO_INTERNO');
   assert.equal(denied.cancellationRequest.status, 'RECUSADO');
   assert.ok((await inbox(fwdA)).includes('CANCELLATION_DENIED'));
   assert.equal(await code(fat, p2.id, '/cancellation/decision', { approve: true }), 'NO_PENDING_REQUEST');
@@ -173,7 +174,7 @@ test('cancelamento de processos e exceções após a autorização', async () =>
 
   // =========== comprovativo por validar bloqueia o cancelamento ===========
   const p3 = await submit(fwdA);
-  await authorize(p3.id);
+  await approve(p3.id);
   assert.equal((await proforma(p3.id)).status, 200);
   assert.equal((await proof(p3.id)).status, 200);
   await ok(fwdA, p3.id, '/cancellation', { reason: 'Quero cancelar este processo' });
@@ -184,7 +185,7 @@ test('cancelamento de processos e exceções após a autorização', async () =>
 
   // =========== pagamento confirmado: já não se cancela ===========
   const p4 = await submit(fwdA);
-  await authorize(p4.id);
+  await approve(p4.id);
   await proforma(p4.id);
   await proof(p4.id);
   await ok(fat, p4.id, '/confirm-payment', {});
@@ -195,11 +196,10 @@ test('cancelamento de processos e exceções após a autorização', async () =>
   const per = await submit(fwdA, { cargoPriority: 'PERECIVEL', cargoCategory: 'Mercadoria frigorífica ou congelada', description: 'Peixe' });
   await ok(fwdA, per.id, '/commitment', { password: 'Senha1234', accept: true }, 201);
   await ok(loja, per.id, '/transition', { status: 'EM_ANALISE' });
-  const early = await ok(loja, per.id, '/authorization', {}, 201);
+  const early = await ok(chefe, per.id, '/authorization', {}, 201);
   assert.equal(early.authorization.type, 'SAIDA_ANTECIPADA');
   assert.equal(await code(fwdA, per.id, '/cancellation', { reason: 'Quero cancelar a carga' }), 'EARLY_RELEASE_BINDING');
   assert.equal(await code(admin, per.id, '/cancel', { reason: 'Cancelamento administrativo' }), 'EARLY_RELEASE_BINDING');
-  assert.equal(await code(admin, per.id, '/authorization/revoke', { reason: 'Revogar a autorização' }), 'EARLY_RELEASE_BINDING');
 
   const ext = (token, body) => post(token, per.id, '/extend-deadline', body);
   assert.equal((await ext(fwdA, { days: 2, reason: 'Preciso de mais tempo' })).status, 403);
@@ -227,22 +227,25 @@ test('cancelamento de processos e exceções após a autorização', async () =>
   assert.equal((await code(admin, per.id, '/extend-deadline', { days: 1, reason: 'Mais uma prorrogação' })), 'EXTENSION_LIMIT');
 
   // =========== revogação de autorização ===========
-  const p6 = await submit(fwdA);
+  const p6 = await submit(fwdA, { cargoPriority: 'PERECIVEL', cargoCategory: 'Mercadoria frigorífica ou congelada', description: 'Carne' });
   assert.equal(await code(admin, p6.id, '/extend-deadline', { days: 2, reason: 'Sem compromisso de pagamento' }), 'NO_DEADLINE');
-  const auth6 = await authorize(p6.id);
+  await pool.query('UPDATE payment_commitments SET due_at = NULL WHERE process_id = ?', [per.id]); // o compromisso em atraso bloquearia este
+  await ok(fwdA, p6.id, '/commitment', { password: 'Senha1234', accept: true }, 201);
+  await approve(p6.id);
+  const auth6 = await ok(admin, p6.id, '/authorization', {}, 201);
   const oldCode = auth6.authorization.code;
   assert.equal((await post(loja, p6.id, '/authorization/revoke', { reason: 'Documento errado' })).status, 403);
   assert.equal((await post(fat, p6.id, '/authorization/revoke', { reason: 'Documento errado' })).status, 403);
   assert.equal((await post(soyo, p6.id, '/authorization/revoke', { reason: 'Documento errado' })).status, 404, 'outra entidade');
   const revoked = await ok(admin, p6.id, '/authorization/revoke', { reason: 'Documento do cliente com erro' });
-  assert.equal(revoked.status, 'EM_ANALISE');
+  assert.equal(revoked.status, 'EM_PROCESSAMENTO_INTERNO', 'a revogação não muda o estado');
   assert.equal(revoked.authorization, null);
-  assert.match(revoked.statusNotes, /Documento do cliente com erro/);
+  assert.equal(revoked.commitment.dueAt, null, 'sem saída antecipada não há prazo');
   assert.ok((await inbox(fwdA)).includes('AUTHORIZATION_REVOKED'));
   assert.deepEqual((await api('GET', `/verify/authorization/${oldCode}`)).body, { valid: false, revoked: true, reference: p6.reference });
-  assert.equal(await code(admin, p6.id, '/authorization/revoke', { reason: 'Revogar outra vez' }), 'INVALID_TRANSITION');
+  assert.equal(await code(admin, p6.id, '/authorization/revoke', { reason: 'Revogar outra vez' }), 'NO_AUTHORIZATION');
 
-  const reissued = await ok(loja, p6.id, '/authorization', {}, 201);
+  const reissued = await ok(chefe, p6.id, '/authorization', {}, 201);
   assert.notEqual(reissued.authorization.code, oldCode, 'nova autorização, novo código');
   assert.equal((await api('GET', `/verify/authorization/${reissued.authorization.code}`)).body.valid, true);
   assert.equal((await api('GET', `/verify/authorization/${oldCode}`)).body.revoked, true);
@@ -250,7 +253,9 @@ test('cancelamento de processos e exceções após a autorização', async () =>
   assert.equal(active.n, 1, 'uma só autorização ativa');
 
   await proforma(p6.id);
-  assert.equal(await code(admin, p6.id, '/authorization/revoke', { reason: 'Já há proforma emitida' }), 'INVALID_TRANSITION');
+  await proof(p6.id);
+  await ok(fat, p6.id, '/confirm-payment', {});
+  assert.equal(await code(admin, p6.id, '/authorization/revoke', { reason: 'O pagamento já foi confirmado' }), 'INVALID_TRANSITION');
 
   // =========== reabrir processos rejeitados ===========
   const p7 = await submit(fwdA);
@@ -264,7 +269,7 @@ test('cancelamento de processos e exceções após a autorização', async () =>
 
   // cancelamento administrativo (antes do pagamento) com pedido pendente a ser fechado
   const p8 = await submit(fwdA);
-  await authorize(p8.id);
+  await approve(p8.id);
   await ok(fwdA, p8.id, '/cancellation', { reason: 'Pedido do transitário' });
   const staffCancelled = await ok(admin, p8.id, '/cancel', { reason: 'Importação suspensa pela Sogester' });
   assert.equal(staffCancelled.status, 'CANCELADO');

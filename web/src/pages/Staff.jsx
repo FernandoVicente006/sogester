@@ -3,7 +3,7 @@ import { api, errorText } from '../api.js'
 import { ROLE_LABELS, useAuth } from '../auth.jsx'
 import { ErrorBox, Field, Icon, Modal, PageHeader } from '../components/ui.jsx'
 
-const ASSIGNABLE = ['LOJA', 'CADASTRO', 'FATURACAO']
+const ASSIGNABLE = ['LOJA', 'CADASTRO', 'FINANCAS', 'CHEFE_COMERCIAL', 'PORTARIA']
 
 export default function Staff() {
   const { user } = useAuth()
@@ -40,7 +40,7 @@ export default function Staff() {
 
   return (
     <>
-      <PageHeader title="Funcionários" subtitle="Atribua a cada pessoa o perfil da sua etapa: Loja, Cadastro ou Faturação.">
+      <PageHeader title="Funcionários" subtitle="Atribua a cada pessoa o perfil da sua etapa.">
         <button className="primary" onClick={() => setCreating(true)}>
           <Icon name="plus" /> Novo funcionário
         </button>

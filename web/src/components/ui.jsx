@@ -81,7 +81,7 @@ export const PROCESS_STATUS_LABELS = {
   REJEITADO: 'Rejeitado',
   DOCUMENTOS_PENDENTES: 'Documentos pendentes',
   DOCUMENTOS_SUBMETIDOS: 'Documentos submetidos',
-  AUTORIZACAO_EMITIDA: 'Autorização emitida',
+  EM_PROCESSAMENTO_INTERNO: 'Em processamento interno',
   PAGAMENTO_PENDENTE: 'Pagamento pendente',
   PAGAMENTO_SUBMETIDO: 'Pagamento submetido',
   PAGAMENTO_CONFIRMADO: 'Pagamento confirmado',

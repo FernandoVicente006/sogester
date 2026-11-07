@@ -15,7 +15,7 @@ export const STATUS_LABELS = {
   REJEITADO: 'Rejeitado',
   DOCUMENTOS_PENDENTES: 'Documentos pendentes',
   DOCUMENTOS_SUBMETIDOS: 'Documentos submetidos',
-  AUTORIZACAO_EMITIDA: 'Autorização emitida',
+  EM_PROCESSAMENTO_INTERNO: 'Em processamento interno',
   PAGAMENTO_PENDENTE: 'Pagamento pendente',
   PAGAMENTO_SUBMETIDO: 'Pagamento submetido',
   PAGAMENTO_CONFIRMADO: 'Pagamento confirmado',
@@ -28,9 +28,9 @@ export const WAITING_ON = {
   SUBMETIDO: 'Sogester (Loja)',
   EM_ANALISE: 'Sogester (Loja)',
   DOCUMENTOS_SUBMETIDOS: 'Sogester (Loja)',
-  AUTORIZACAO_EMITIDA: 'Sogester (Faturação)',
-  PAGAMENTO_SUBMETIDO: 'Sogester (Faturação)',
-  PAGAMENTO_CONFIRMADO: 'Sogester (Faturação)',
+  EM_PROCESSAMENTO_INTERNO: 'Sogester (Loja)',
+  PAGAMENTO_SUBMETIDO: 'Sogester (Finanças)',
+  PAGAMENTO_CONFIRMADO: 'Sogester (Finanças)',
   DOCUMENTOS_PENDENTES: 'Transitário',
   PAGAMENTO_PENDENTE: 'Transitário',
 };
@@ -73,12 +73,12 @@ export async function processesReport(actor, filters) {
     `SELECT p.id, p.reference, e.code AS entityCode, f.name AS forwarderName, c.name AS clientName,
             c.document_number AS clientDocument, p.cargo_priority AS cargoPriority, p.volume_type AS volumeType,
             p.cargo_category AS cargoCategory, p.status, p.urgency_requested AS urgent, p.submitted_at AS submittedAt,
-            a.at AS authorizedAt, d.at AS completedAt, i.amount, i.currency
+            a.at AS approvedAt, d.at AS completedAt, i.amount, i.currency
        FROM processes p
        JOIN entities e ON e.id = p.entity_id
        JOIN forwarders f ON f.id = p.forwarder_id
        JOIN clients c ON c.id = p.client_id
-       LEFT JOIN (SELECT process_id, MIN(created_at) AS at FROM process_status_history WHERE to_status = 'AUTORIZACAO_EMITIDA' GROUP BY process_id) a ON a.process_id = p.id
+       LEFT JOIN (SELECT process_id, MIN(created_at) AS at FROM process_status_history WHERE to_status IN ('EM_PROCESSAMENTO_INTERNO', 'AUTORIZACAO_EMITIDA') GROUP BY process_id) a ON a.process_id = p.id
        LEFT JOIN (SELECT process_id, MIN(created_at) AS at FROM process_status_history WHERE to_status = 'CONCLUIDO' GROUP BY process_id) d ON d.process_id = p.id
        LEFT JOIN invoices i ON i.process_id = p.id
       WHERE ${where.join(' AND ')}
@@ -89,7 +89,7 @@ export async function processesReport(actor, filters) {
     ...r,
     urgent: !!r.urgent,
     amount: r.amount === null ? null : Number(r.amount),
-    hoursToAuthorization: round(hoursBetween(r.submittedAt, r.authorizedAt)),
+    hoursToApproval: round(hoursBetween(r.submittedAt, r.approvedAt)),
     hoursToComplete: round(hoursBetween(r.submittedAt, r.completedAt)),
   }));
 
@@ -100,7 +100,7 @@ export async function processesReport(actor, filters) {
     cancelled: data.filter((r) => r.status === 'CANCELADO').length,
     rejected: data.filter((r) => r.status === 'REJEITADO').length,
     urgent: data.filter((r) => r.urgent).length,
-    avgHoursToAuthorization: avg(data.map((r) => r.hoursToAuthorization).filter((h) => h !== null)),
+    avgHoursToApproval: avg(data.map((r) => r.hoursToApproval).filter((h) => h !== null)),
     avgHoursToComplete: avg(data.map((r) => r.hoursToComplete).filter((h) => h !== null)),
     byStatus: count(data, 'status'),
     byPriority: count(data, 'cargoPriority'),
@@ -125,9 +125,9 @@ const processColumns = [
   { label: 'Tipo de carga', value: (r) => r.cargoCategory },
   { label: 'Estado', value: (r) => STATUS_LABELS[r.status] },
   { label: 'Submetido em', value: (r) => r.submittedAt },
-  { label: 'Autorizado em', value: (r) => r.authorizedAt },
+  { label: 'Documentos conformes em', value: (r) => r.approvedAt },
   { label: 'Concluído em', value: (r) => r.completedAt },
-  { label: 'Horas até autorização', value: (r) => r.hoursToAuthorization },
+  { label: 'Horas até conformidade', value: (r) => r.hoursToApproval },
   { label: 'Horas até conclusão', value: (r) => r.hoursToComplete },
   { label: 'Valor da proforma', value: (r) => r.amount },
   { label: 'Moeda', value: (r) => r.currency },
@@ -136,7 +136,10 @@ const processColumns = [
 // ---- receita ---------------------------------------------------------------------------------
 const month = (d) => `${new Date(d).getFullYear()}-${String(new Date(d).getMonth() + 1).padStart(2, '0')}`;
 
-/** Faturado = proformas emitidas no período; cobrado = pagamentos confirmados no período; em aberto = faturado ainda não confirmado. */
+/**
+ * Faturado = proformas emitidas no período; cobrado = pagamentos confirmados no período; em aberto = faturado ainda não confirmado.
+ * O valor da proforma é opcional: as que não o têm ficam fora dos totais e são contadas em `withoutAmount`.
+ */
 export async function revenueReport(actor, filters) {
   const period = resolvePeriod(filters);
   const scope = entityScope(actor, filters.entityId);
@@ -160,7 +163,7 @@ export async function revenueReport(actor, filters) {
   const from = new Date(`${period.from}T00:00:00`);
   const to = new Date(`${period.to}T23:59:59`);
   const inRange = (d) => d && new Date(d) >= from && new Date(d) <= to;
-  const data = rows.map((r) => ({ ...r, amount: Number(r.amount) }));
+  const data = rows.map((r) => ({ ...r, amount: r.amount === null ? null : Number(r.amount) }));
 
   const totals = {};
   const series = {};
@@ -169,6 +172,7 @@ export async function revenueReport(actor, filters) {
   const point = (m, currency) => (series[`${m}|${currency}`] ??= { month: m, currency, invoiced: 0, collected: 0 });
 
   for (const r of data) {
+    if (r.amount === null) continue;
     const t = bucket(r.currency);
     if (inRange(r.proformaIssuedAt)) {
       t.invoiced += r.amount;
@@ -188,6 +192,7 @@ export async function revenueReport(actor, filters) {
     totals: Object.values(totals).map(money),
     series: Object.values(series).map(money).sort((a, b) => a.month.localeCompare(b.month)),
     topForwarders: Object.values(byForwarder).map(money).sort((a, b) => b.collected - a.collected).slice(0, 10),
+    withoutAmount: data.filter((r) => r.amount === null).length,
     rows: data,
     truncated: data.length >= MAX_ROWS,
   };

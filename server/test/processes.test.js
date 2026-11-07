@@ -82,7 +82,7 @@ test('submissão, fila, estados e documentos de processos', async () => {
   });
   const admin = await login('dir@cabinda.ao', 'Senha1234');
   await api('POST', '/users', { token: admin, body: { name: 'Loja', email: 'loja@cabinda.ao', password: 'Senha1234', role: 'LOJA' } });
-  await api('POST', '/users', { token: admin, body: { name: 'Fat', email: 'fat@cabinda.ao', password: 'Senha1234', role: 'FATURACAO' } });
+  await api('POST', '/users', { token: admin, body: { name: 'Fat', email: 'fat@cabinda.ao', password: 'Senha1234', role: 'FINANCAS' } });
   const loja = await login('loja@cabinda.ao', 'Senha1234');
 
   const mkForwarder = async (n, approve) => {

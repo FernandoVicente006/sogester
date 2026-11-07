@@ -45,7 +45,7 @@ export default function App() {
         <Route
           path="relatorios"
           element={
-            <Protected roles={['SUPER_ADMIN', 'ADMIN_ENTIDADE', 'LOJA', 'CADASTRO', 'FATURACAO']}>
+            <Protected roles={['SUPER_ADMIN', 'ADMIN_ENTIDADE', 'LOJA', 'CADASTRO', 'FINANCAS', 'CHEFE_COMERCIAL']}>
               <Reports />
             </Protected>
           }

@@ -15,8 +15,8 @@ const commitmentTerms = (p) =>
   `mediante a proforma que me for apresentada. Reconheço que a carga é libertada antes da confirmação do pagamento ` +
   `exclusivamente com base neste compromisso e que o incumprimento suspende novos compromissos deste género.`;
 
-const PRE_AUTHORIZATION = ['SUBMETIDO', 'EM_ANALISE', 'DOCUMENTOS_PENDENTES', 'DOCUMENTOS_SUBMETIDOS'];
-const AUTHORIZABLE = ['EM_ANALISE', 'DOCUMENTOS_SUBMETIDOS'];
+const SIGNABLE = ['SUBMETIDO', 'EM_ANALISE', 'DOCUMENTOS_PENDENTES', 'DOCUMENTOS_SUBMETIDOS', 'EM_PROCESSAMENTO_INTERNO'];
+const AUTHORIZABLE = ['EM_ANALISE', 'DOCUMENTOS_SUBMETIDOS', 'EM_PROCESSAMENTO_INTERNO'];
 
 // ---- código de autorização verificável ----------------------------------------------------
 function authorizationCode({ processId, reference, type, issuedAt, commitmentSignature, seq = 1 }) {
@@ -36,7 +36,7 @@ export async function signCommitment(actor, id, { password, accept }, ip) {
   if (!isForwarder(actor)) throw forbidden();
   const process = await loadAccessible(actor, id);
   if (process.cargoPriority !== 'PERECIVEL') throw conflict('Só cargas perecíveis usam compromisso de pagamento', 'NOT_PERISHABLE');
-  if (!PRE_AUTHORIZATION.includes(process.status)) throw conflict('O compromisso já não pode ser assinado neste estado', 'INVALID_STATE');
+  if (!SIGNABLE.includes(process.status)) throw conflict('O compromisso já não pode ser assinado neste estado', 'INVALID_STATE');
   if (!accept) throw badRequest('É necessário aceitar os termos', 'TERMS_NOT_ACCEPTED');
 
   const user = await queryOne('SELECT password_hash FROM users WHERE id = ?', [actor.id]);
@@ -78,20 +78,20 @@ export async function getCommitmentTerms(actor, id) {
   return { version: COMMITMENT_TERMS_VERSION, text: commitmentTerms(process) };
 }
 
-// ---- autorização digital -------------------------------------------------------------------
-/** A Sogester emite o termo. Cargas perecíveis exigem compromisso assinado e ficam com saída antecipada. */
+// ---- saída antecipada ----------------------------------------------------------------------
+/** Exceção paralela ao fluxo: não muda o estado do processo, que continua até à proforma e ao pagamento. */
 export async function issueAuthorization(actor, id, { notes } = {}) {
   const process = await loadAccessible(actor, id);
   if (!AUTHORIZABLE.includes(process.status)) {
-    throw conflict('A autorização só pode ser emitida após a análise da documentação', 'INVALID_TRANSITION');
+    throw conflict('A saída antecipada só pode ser emitida durante a análise ou o processamento interno', 'INVALID_TRANSITION');
   }
-  const perishable = process.cargoPriority === 'PERECIVEL';
+  if (await queryOne('SELECT id FROM authorizations WHERE process_id = ? AND revoked_at IS NULL', [id])) {
+    throw conflict('Este processo já tem uma saída antecipada ativa', 'ALREADY_AUTHORIZED');
+  }
   const commitment = await queryOne('SELECT id, signature_hash AS signature FROM payment_commitments WHERE process_id = ?', [id]);
-  if (perishable && !commitment) {
-    throw conflict('Carga perecível: o transitário tem de assinar o compromisso de pagamento primeiro', 'COMMITMENT_REQUIRED');
-  }
+  if (!commitment) throw conflict('O transitário tem de assinar o compromisso de pagamento primeiro', 'COMMITMENT_REQUIRED');
 
-  const type = perishable ? 'SAIDA_ANTECIPADA' : 'PADRAO';
+  const type = 'SAIDA_ANTECIPADA';
   const issuedAt = new Date();
   issuedAt.setMilliseconds(0);
   const { n: previous } = await queryOne('SELECT COUNT(*) AS n FROM authorizations WHERE process_id = ?', [id]);
@@ -101,23 +101,20 @@ export async function issueAuthorization(actor, id, { notes } = {}) {
     reference: process.reference,
     type,
     issuedAt,
-    commitmentSignature: commitment?.signature,
+    commitmentSignature: commitment.signature,
     seq,
   });
 
   await withTransaction(async (conn) => {
-    await changeStatus(actor, process, 'AUTORIZACAO_EMITIDA', notes, conn);
     await conn.query(
       'INSERT INTO authorizations (process_id, type, code, commitment_id, issued_by, issued_at, notes, seq) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      [id, type, code, commitment?.id ?? null, actor.id, issuedAt, notes ?? null, seq],
+      [id, type, code, commitment.id, actor.id, issuedAt, notes ?? null, seq],
     );
-    if (commitment) {
-      await conn.query('UPDATE payment_commitments SET due_at = DATE_ADD(?, INTERVAL ? DAY) WHERE id = ?', [
-        issuedAt,
-        config.commitmentDays,
-        commitment.id,
-      ]);
-    }
+    await conn.query('UPDATE payment_commitments SET due_at = DATE_ADD(?, INTERVAL ? DAY) WHERE id = ?', [
+      issuedAt,
+      config.commitmentDays,
+      commitment.id,
+    ]);
     await audit(actor, 'AUTHORIZATION_ISSUED', 'process', id, { entityId: process.entityId, details: { type, code }, conn });
   });
   await notifyProcessEvent('AUTHORIZATION_ISSUED', process, { actor });
@@ -154,17 +151,18 @@ export async function verifyAuthorization(code) {
 }
 
 // ---- proforma, comprovativo, confirmação e fatura recibo ------------------------------------
+/** A Loja carrega a proforma gerada no sistema de faturação da Sogester; só o ficheiro é obrigatório. */
 export async function issueProforma(actor, id, data, file) {
   const process = await loadAccessible(actor, id);
-  if (process.status !== 'AUTORIZACAO_EMITIDA') {
-    throw conflict('A proforma só pode ser emitida depois da autorização', 'INVALID_TRANSITION');
+  if (process.status !== 'EM_PROCESSAMENTO_INTERNO') {
+    throw conflict('A proforma só pode ser carregada depois de os documentos estarem conformes', 'INVALID_TRANSITION');
   }
   await withTransaction(async (conn) => {
     await changeStatus(actor, process, 'PAGAMENTO_PENDENTE', null, conn);
     await conn.query(
       `INSERT INTO invoices (process_id, proforma_number, amount, currency, payment_entity, payment_reference, proforma_issued_by)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [id, data.number, data.amount, data.currency ?? 'AOA', data.paymentEntity, data.paymentReference, actor.id],
+      [id, data.number ?? null, data.amount ?? null, data.currency ?? 'AOA', data.paymentEntity ?? null, data.paymentReference ?? null, actor.id],
     );
     await insertDocument(conn, id, 'PROFORMA', file, actor.id);
     await audit(actor, 'PROFORMA_ISSUED', 'process', id, { entityId: process.entityId, details: { number: data.number }, conn });
@@ -214,6 +212,7 @@ export async function rejectPayment(actor, id, { notes }) {
   return getProcess(actor, id);
 }
 
+/** As Finanças carregam a fatura recibo gerada no sistema de faturação; o processo conclui-se sozinho. */
 export async function issueReceipt(actor, id, { number }, file) {
   const process = await loadAccessible(actor, id);
   if (process.status !== 'PAGAMENTO_CONFIRMADO') {
@@ -223,7 +222,7 @@ export async function issueReceipt(actor, id, { number }, file) {
     await changeStatus(actor, process, 'CONCLUIDO', null, conn);
     await conn.query(
       'UPDATE invoices SET receipt_number = ?, receipt_issued_by = ?, receipt_issued_at = NOW() WHERE process_id = ?',
-      [number, actor.id, id],
+      [number ?? null, actor.id, id],
     );
     await insertDocument(conn, id, 'FATURA_RECIBO', file, actor.id);
     await audit(actor, 'RECEIPT_ISSUED', 'process', id, { entityId: process.entityId, details: { number }, conn });

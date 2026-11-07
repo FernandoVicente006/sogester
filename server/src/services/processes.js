@@ -14,15 +14,13 @@ export const MAX_EXTENSIONS = 2;
 
 export const documentsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../uploads/documents');
 
-/**
- * Transições de estado atualmente expostas. A partir de AUTORIZACAO_EMITIDA (autorização digital e
- * faturação) pertence ao módulo 6 e será acrescentada ao mesmo mapa.
- */
+/** Transições da análise pela Loja; daí em diante o processo avança com a proforma, o comprovativo e o recibo. */
 export const STAFF_TRANSITIONS = {
   SUBMETIDO: ['EM_ANALISE', 'REJEITADO'],
-  EM_ANALISE: ['DOCUMENTOS_PENDENTES', 'REJEITADO'],
+  EM_ANALISE: ['EM_PROCESSAMENTO_INTERNO', 'DOCUMENTOS_PENDENTES', 'REJEITADO'],
   DOCUMENTOS_PENDENTES: ['REJEITADO'], // sem resposta do transitário
-  DOCUMENTOS_SUBMETIDOS: ['EM_ANALISE', 'DOCUMENTOS_PENDENTES', 'REJEITADO'],
+  DOCUMENTOS_SUBMETIDOS: ['EM_ANALISE', 'EM_PROCESSAMENTO_INTERNO', 'DOCUMENTOS_PENDENTES', 'REJEITADO'],
+  EM_PROCESSAMENTO_INTERNO: ['DOCUMENTOS_PENDENTES', 'REJEITADO'], // anomalia detetada nos procedimentos internos
 };
 const NOTES_REQUIRED = ['DOCUMENTOS_PENDENTES', 'REJEITADO'];
 
@@ -313,7 +311,7 @@ export async function getProcess(actor, id) {
     commitment: commitment ? { ...commitment, extensions, extensionsLeft: Math.max(0, MAX_EXTENSIONS - commitment.extensionCount) } : null,
     cancellationRequest: cancellation ?? null,
     authorization: authorization ?? null,
-    invoice: invoice ? { ...invoice, amount: Number(invoice.amount) } : null,
+    invoice: invoice ? { ...invoice, amount: num(invoice.amount) } : null,
   };
 }
 
@@ -344,6 +342,9 @@ export async function transition(actor, id, { status, notes }) {
     throw conflict(`Transição ${process.status} → ${status} não permitida`, 'INVALID_TRANSITION');
   }
   if (NOTES_REQUIRED.includes(status) && !notes) throw badRequest('Indique o motivo ou os documentos em falta', 'NOTES_REQUIRED');
+  if (status === 'REJEITADO' && (await queryOne('SELECT id FROM authorizations WHERE process_id = ? AND revoked_at IS NULL', [id]))) {
+    throw conflict('Há uma saída antecipada ativa: revogue-a antes de rejeitar', 'EARLY_RELEASE_BINDING');
+  }
   await withTransaction(async (conn) => {
     await changeStatus(actor, process, status, notes, conn);
     if (status === 'DOCUMENTOS_PENDENTES') {
@@ -353,7 +354,12 @@ export async function transition(actor, id, { status, notes }) {
       );
     }
   });
-  const event = { EM_ANALISE: process.status === 'SUBMETIDO' ? 'ANALYSIS_STARTED' : null, DOCUMENTOS_PENDENTES: 'DOCUMENTS_REQUESTED', REJEITADO: 'PROCESS_REJECTED' }[status];
+  const event = {
+    EM_ANALISE: process.status === 'SUBMETIDO' ? 'ANALYSIS_STARTED' : null,
+    EM_PROCESSAMENTO_INTERNO: 'DOCUMENTS_APPROVED',
+    DOCUMENTOS_PENDENTES: 'DOCUMENTS_REQUESTED',
+    REJEITADO: 'PROCESS_REJECTED',
+  }[status];
   if (event) await notifyProcessEvent(event, process, { actor, notes });
   return getProcess(actor, id);
 }

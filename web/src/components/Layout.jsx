@@ -64,7 +64,7 @@ export default function Layout() {
               </span>
             )}
           </NavLink>
-          {user.role !== 'TRANSITARIO' && (
+          {!['TRANSITARIO', 'PORTARIA'].includes(user.role) && (
             <NavLink to="/relatorios">
               <Icon name="chart" /> Relatórios
             </NavLink>

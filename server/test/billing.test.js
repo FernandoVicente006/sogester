@@ -66,18 +66,19 @@ after(async () => {
   await pool.end();
 });
 
-test('autorização digital, compromisso de pagamento e faturação', async () => {
+test('fluxo normal, proforma, comprovativo, fatura recibo e saída antecipada', async () => {
   // --- preparação
   await api('POST', '/setup/entity-admin', {
     body: { entityCode: 'CABINDA', name: 'Diretor', email: 'dir@cabinda.ao', password: 'Senha1234' },
     headers: { 'x-setup-token': 'test-setup-token' },
   });
   const admin = await login('dir@cabinda.ao', 'Senha1234');
-  for (const [name, role] of [['Loja', 'LOJA'], ['Fat', 'FATURACAO']]) {
+  for (const [name, role] of [['Loja', 'LOJA'], ['Fat', 'FINANCAS'], ['Chefe', 'CHEFE_COMERCIAL']]) {
     await api('POST', '/users', { token: admin, body: { name, email: `${role.toLowerCase()}@cabinda.ao`, password: 'Senha1234', role } });
   }
   const loja = await login('loja@cabinda.ao', 'Senha1234');
-  const fat = await login('faturacao@cabinda.ao', 'Senha1234');
+  const fat = await login('financas@cabinda.ao', 'Senha1234');
+  const chefe = await login('chefe_comercial@cabinda.ao', 'Senha1234');
 
   const mkForwarder = async (n) => {
     const r = await api('POST', '/forwarders', {
@@ -110,32 +111,28 @@ test('autorização digital, compromisso de pagamento e faturação', async () =
 
   // =========== fluxo normal (carga não perecível) ===========
   const p = await submit(fwdA);
-  await step(loja, '/authorization', 409, { id: p.id, req: { body: {} } }); // ainda SUBMETIDO
   await analyse(p.id);
 
   assert.equal((await api('GET', `/processes/${p.id}/commitment-terms`, { token: fwdA })).status, 200);
   await step(fwdA, '/commitment', 409, { id: p.id, req: { body: { password: 'Senha1234', accept: true } } }); // não perecível
-  await step(fat, '/authorization', 403, { id: p.id, req: { body: {} } });
-  await step(fwdA, '/authorization', 403, { id: p.id, req: { body: {} } });
-
-  const authorized = (await step(loja, '/authorization', 201, { id: p.id, req: { body: { notes: 'Documentação conforme' } } })).process;
-  assert.equal(authorized.status, 'AUTORIZACAO_EMITIDA');
-  assert.equal(authorized.authorization.type, 'PADRAO');
-  assert.match(authorized.authorization.code, /^AUT-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}$/);
-  await step(loja, '/authorization', 409, { id: p.id, req: { body: {} } });
-
-  // proforma: só faturação; exige PDF e dados
+  // proforma: só depois de os documentos estarem conformes, carregada pela Loja; só o ficheiro é obrigatório
   const proformaForm = () =>
     form({ number: 'PF-2026/001', amount: 150000.5, paymentEntity: '11111', paymentReference: '987654321' }, ['proforma']);
-  await step(loja, '/proforma', 403, { id: p.id, req: { form: proformaForm() } });
-  await step(fat, '/proforma', 400, { id: p.id, req: { form: form({ number: 'x' }, ['proforma']) } });
-  await step(fat, '/proforma', 400, { id: p.id, req: { form: form({ number: 'x', amount: 1, paymentEntity: 'a', paymentReference: 'b' }, []) } });
-  const withProforma = (await step(fat, '/proforma', 200, { id: p.id, req: { form: proformaForm() } })).process;
+  await step(loja, '/proforma', 409, { id: p.id, req: { form: proformaForm() } }); // ainda em análise
+  await step(fat, '/transition', 403, { id: p.id, req: { body: { status: 'EM_PROCESSAMENTO_INTERNO' } } });
+  const approved = (await step(loja, '/transition', 200, { id: p.id, req: { body: { status: 'EM_PROCESSAMENTO_INTERNO' } } })).process;
+  assert.equal(approved.status, 'EM_PROCESSAMENTO_INTERNO');
+  assert.equal(approved.authorization, null, 'o fluxo normal não usa autorização');
+
+  await step(fat, '/proforma', 403, { id: p.id, req: { form: proformaForm() } });
+  await step(fwdA, '/proforma', 403, { id: p.id, req: { form: proformaForm() } });
+  await step(loja, '/proforma', 400, { id: p.id, req: { form: form({ number: 'x' }, []) } }); // sem ficheiro
+  const withProforma = (await step(loja, '/proforma', 200, { id: p.id, req: { form: proformaForm() } })).process;
   assert.equal(withProforma.status, 'PAGAMENTO_PENDENTE');
   assert.equal(withProforma.invoice.amount, 150000.5);
   assert.equal(withProforma.invoice.paymentReference, '987654321');
   assert.ok(withProforma.documents.some((d) => d.kind === 'PROFORMA'));
-  await step(fat, '/proforma', 409, { id: p.id, req: { form: proformaForm() } });
+  await step(loja, '/proforma', 409, { id: p.id, req: { form: proformaForm() } });
 
   // o transitário não pode forjar documentos de faturação pelo endpoint genérico
   const forged = new FormData();
@@ -166,7 +163,7 @@ test('autorização digital, compromisso de pagamento e faturação', async () =
   assert.equal(done.status, 'CONCLUIDO');
   assert.equal(done.invoice.receiptNumber, 'FR 2026/001');
   assert.deepEqual(done.history.map((h) => h.toStatus), [
-    'SUBMETIDO', 'EM_ANALISE', 'AUTORIZACAO_EMITIDA', 'PAGAMENTO_PENDENTE', 'PAGAMENTO_SUBMETIDO',
+    'SUBMETIDO', 'EM_ANALISE', 'EM_PROCESSAMENTO_INTERNO', 'PAGAMENTO_PENDENTE', 'PAGAMENTO_SUBMETIDO',
     'PAGAMENTO_PENDENTE', 'PAGAMENTO_SUBMETIDO', 'PAGAMENTO_CONFIRMADO', 'CONCLUIDO',
   ]);
   const receipt = done.documents.find((d) => d.kind === 'FATURA_RECIBO');
@@ -175,11 +172,25 @@ test('autorização digital, compromisso de pagamento e faturação', async () =
   const dlOther = await fetch(`${base}/api/v1/processes/${p.id}/documents/${receipt.id}`, { headers: { authorization: `Bearer ${fwdB}` } });
   assert.equal(dlOther.status, 404);
 
-  // =========== carga perecível: compromisso + saída antecipada ===========
+  // =========== só o ficheiro é obrigatório ===========
+  const bare = await submit(fwdA);
+  await analyse(bare.id);
+  await step(loja, '/transition', 200, { id: bare.id, req: { body: { status: 'EM_PROCESSAMENTO_INTERNO' } } });
+  const noData = (await step(loja, '/proforma', 200, { id: bare.id, req: { form: form(null, ['proforma']) } })).process;
+  assert.equal(noData.status, 'PAGAMENTO_PENDENTE');
+  assert.deepEqual([noData.invoice.proformaNumber, noData.invoice.amount, noData.invoice.paymentReference], [null, null, null]);
+  await step(fwdA, '/payment-proof', 200, { id: bare.id, req: { form: form(null, ['proof']) } });
+  await step(fat, '/confirm-payment', 200, { id: bare.id, req: { body: {} } });
+  await step(fat, '/receipt', 400, { id: bare.id, req: { form: form(null, []) } }); // sem ficheiro
+  const noNumber = (await step(fat, '/receipt', 200, { id: bare.id, req: { form: form(null, ['receipt']) } })).process;
+  assert.equal(noNumber.status, 'CONCLUIDO');
+  assert.equal(noNumber.invoice.receiptNumber, null);
+
+  // =========== saída antecipada: exceção paralela ao fluxo ===========
   const per = await submit(fwdA, { cargoPriority: 'PERECIVEL', cargoCategory: 'Mercadoria frigorífica ou congelada', description: 'Peixe' });
   await analyse(per.id);
-  await step(loja, '/authorization', 409, { id: per.id, req: { body: {} } }); // falta compromisso
-  assert.equal((await api('POST', `/processes/${per.id}/authorization`, { token: loja, body: {} })).body.error.code, 'COMMITMENT_REQUIRED');
+  await step(chefe, '/authorization', 409, { id: per.id, req: { body: {} } }); // falta compromisso
+  assert.equal((await api('POST', `/processes/${per.id}/authorization`, { token: chefe, body: {} })).body.error.code, 'COMMITMENT_REQUIRED');
 
   const terms = (await api('GET', `/processes/${per.id}/commitment-terms`, { token: fwdA })).body;
   assert.match(terms.text, new RegExp(per.reference));
@@ -192,8 +203,13 @@ test('autorização digital, compromisso de pagamento e faturação', async () =
   assert.equal(signed.commitment.dueAt, null);
   await step(fwdA, '/commitment', 409, { id: per.id, req: { body: { password: 'Senha1234', accept: true } } });
 
-  const early = (await step(loja, '/authorization', 201, { id: per.id, req: { body: {} } })).process;
+  for (const t of [loja, fat, fwdA]) await step(t, '/authorization', 403, { id: per.id, req: { body: {} } });
+  const early = (await step(chefe, '/authorization', 201, { id: per.id, req: { body: {} } })).process;
+  assert.equal(early.status, 'EM_ANALISE', 'não muda o estado do processo');
   assert.equal(early.authorization.type, 'SAIDA_ANTECIPADA');
+  assert.match(early.authorization.code, /^AUT-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}$/);
+  assert.equal((await api('POST', `/processes/${per.id}/authorization`, { token: admin, body: {} })).body.error.code, 'ALREADY_AUTHORIZED');
+  assert.equal((await api('POST', `/processes/${per.id}/transition`, { token: loja, body: { status: 'REJEITADO', notes: 'Falta documento' } })).body.error.code, 'EARLY_RELEASE_BINDING');
   assert.ok(early.commitment.dueAt, 'prazo de pagamento definido na autorização');
   assert.equal(early.paymentOverdue, false);
 
@@ -218,7 +234,8 @@ test('autorização digital, compromisso de pagamento e faturação', async () =
   assert.equal(blocked.body.error.code, 'OVERDUE_COMMITMENTS');
 
   // liquidar o primeiro remove o bloqueio
-  await step(fat, '/proforma', 200, { id: per.id, req: { form: proformaForm() } });
+  await step(loja, '/transition', 200, { id: per.id, req: { body: { status: 'EM_PROCESSAMENTO_INTERNO' } } });
+  await step(loja, '/proforma', 200, { id: per.id, req: { form: proformaForm() } });
   await step(fwdA, '/payment-proof', 200, { id: per.id, req: { form: form(null, ['proof']) } });
   await step(fat, '/confirm-payment', 200, { id: per.id, req: { body: {} } });
   const settled = (await api('GET', `/processes/${per.id}`, { token: fwdA })).body.process;

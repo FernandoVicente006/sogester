@@ -4,7 +4,7 @@ import { api, downloadFile, errorText } from '../api.js'
 import { useAuth } from '../auth.jsx'
 import { Empty, ErrorBox, Field, Icon, PRIORITY_LABELS, PROCESS_STATUS_LABELS, PageHeader, ProcessBadge, formatDate } from '../components/ui.jsx'
 
-const BILLING_ROLES = ['SUPER_ADMIN', 'ADMIN_ENTIDADE', 'FATURACAO']
+const BILLING_ROLES = ['SUPER_ADMIN', 'ADMIN_ENTIDADE', 'FINANCAS', 'CHEFE_COMERCIAL']
 const VOLUME_LABELS = { ALTO: 'Alto', CARGA_GRANEL: 'Carga granel', CARGA_GERAL: 'Carga geral', CONTENTOR: 'Contentor' }
 
 const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
@@ -218,7 +218,7 @@ function ProcessesView({ report }) {
         <Kpi icon="check" tone="green" value={s.completed} label="Concluídos" />
         <Kpi icon="clock" tone="amber" value={s.active} label="Em curso" />
         <Kpi icon="x" tone="red" value={s.cancelled + s.rejected} label="Cancelados e rejeitados" />
-        <Kpi icon="clock" value={fmtHours(s.avgHoursToAuthorization)} label="Tempo médio até autorizar" />
+        <Kpi icon="clock" value={fmtHours(s.avgHoursToApproval)} label="Tempo médio até conformidade" />
         <Kpi icon="check" tone="green" value={fmtHours(s.avgHoursToComplete)} label="Tempo médio até concluir" />
       </div>
       <div className="two-col">
@@ -247,7 +247,7 @@ function ProcessesView({ report }) {
               <th>Carga</th>
               <th>Estado</th>
               <th>Submetido</th>
-              <th className="num">Até autorizar</th>
+              <th className="num">Até conformidade</th>
               <th className="num">Até concluir</th>
               <th className="num">Proforma</th>
             </tr>
@@ -268,7 +268,7 @@ function ProcessesView({ report }) {
                   <ProcessBadge status={r.status} />
                 </td>
                 <td className="muted">{formatDate(r.submittedAt)}</td>
-                <td className="num">{fmtHours(r.hoursToAuthorization)}</td>
+                <td className="num">{fmtHours(r.hoursToApproval)}</td>
                 <td className="num">{fmtHours(r.hoursToComplete)}</td>
                 <td className="num">{r.amount === null ? '—' : money(r.amount, r.currency)}</td>
               </tr>
@@ -299,6 +299,11 @@ function RevenueView({ report }) {
             ))}
           </select>
         </div>
+      )}
+      {report.withoutAmount > 0 && (
+        <p className="notice">
+          <Icon name="alert" /> {report.withoutAmount} {report.withoutAmount === 1 ? 'proforma sem valor indicado ficou' : 'proformas sem valor indicado ficaram'} fora dos totais.
+        </p>
       )}
       <div className="kpis">
         <Kpi icon="file" value={money(total.invoiced, currency)} money label="Faturado (proformas emitidas)" />
@@ -363,7 +368,7 @@ function RevenueView({ report }) {
                 </td>
                 <td>{r.forwarderName}</td>
                 <td>{r.proformaNumber}</td>
-                <td className="num">{money(r.amount, r.currency)}</td>
+                <td className="num">{r.amount === null ? '—' : money(r.amount, r.currency)}</td>
                 <td className="muted">{formatDate(r.proformaIssuedAt)}</td>
                 <td>{r.paymentConfirmedAt ? <span className="badge badge-APROVADO">{formatDate(r.paymentConfirmedAt)}</span> : <span className="badge badge-PENDENTE">Por cobrar</span>}</td>
                 <td>{r.receiptNumber ?? '—'}</td>

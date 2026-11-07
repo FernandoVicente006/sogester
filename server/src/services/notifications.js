@@ -5,8 +5,8 @@ import { CARGO_PRIORITIES } from '../cargo.js';
 import { ROLES } from '../roles.js';
 import { mailEnabled, sendMail } from './mailer.js';
 
-const { LOJA, ADMIN_ENTIDADE, CADASTRO, FATURACAO } = ROLES;
-const STAFF_ALL = [LOJA, ADMIN_ENTIDADE, CADASTRO, FATURACAO];
+const { LOJA, ADMIN_ENTIDADE, CADASTRO, FINANCAS, CHEFE_COMERCIAL } = ROLES;
+const STAFF_ALL = [LOJA, ADMIN_ENTIDADE, CADASTRO, FINANCAS];
 
 /**
  * Eventos de processo: quem é avisado e com que texto. `forwarder` avisa os utilizadores do transitário;
@@ -22,6 +22,11 @@ const EVENTS = {
     forwarder: true,
     title: (p) => `Processo ${p.reference} em análise`,
     body: () => 'A Sogester iniciou a análise da documentação.',
+  },
+  DOCUMENTS_APPROVED: {
+    forwarder: true,
+    title: (p) => `Documentação conforme — ${p.reference}`,
+    body: () => 'A Sogester está a tratar dos procedimentos internos. A proforma segue em breve.',
   },
   DOCUMENTS_REQUESTED: {
     forwarder: true,
@@ -39,24 +44,25 @@ const EVENTS = {
     body: (_p, notes) => notes || 'O processo foi rejeitado.',
   },
   COMMITMENT_SIGNED: {
-    staff: [LOJA, ADMIN_ENTIDADE],
+    staff: [ADMIN_ENTIDADE, CHEFE_COMERCIAL],
     title: (p) => `Compromisso de pagamento assinado — ${p.reference}`,
     body: (p) => `${p.forwarderName} assinou o compromisso: pode emitir a autorização de saída antecipada.`,
   },
   AUTHORIZATION_ISSUED: {
     forwarder: true,
-    staff: [FATURACAO],
-    title: (p, audience) => (audience === 'staff' ? `Emitir proforma — ${p.reference}` : `Autorização emitida — ${p.reference}`),
-    body: (_p, _n, audience) =>
-      audience === 'staff' ? 'A autorização foi emitida: falta emitir a fatura proforma.' : 'A Sogester emitiu a autorização digital do processo.',
+    staff: [LOJA, FINANCAS],
+    title: (p) => `Saída antecipada emitida — ${p.reference}`,
+    body: () => 'A Sogester autorizou a saída antecipada da carga.',
   },
   PROFORMA_ISSUED: {
     forwarder: true,
-    title: (p) => `Proforma disponível — ${p.reference}`,
-    body: () => 'Efetue o pagamento e carregue o comprovativo no processo.',
+    staff: [FINANCAS],
+    title: (p, audience) => (audience === 'staff' ? `Pagamento pendente — ${p.reference}` : `Proforma disponível — ${p.reference}`),
+    body: (_p, _n, audience) =>
+      audience === 'staff' ? 'A proforma foi enviada ao transitário: aguarda o pagamento.' : 'Efetue o pagamento e carregue o comprovativo no processo.',
   },
   PAYMENT_PROOF_SUBMITTED: {
-    staff: [FATURACAO, ADMIN_ENTIDADE],
+    staff: [FINANCAS, ADMIN_ENTIDADE],
     title: (p) => `Comprovativo para validar — ${p.reference}`,
     body: (p) => `${p.forwarderName} carregou o comprovativo de pagamento.`,
   },
@@ -81,7 +87,7 @@ const EVENTS = {
     body: (p, notes) => `${p.forwarderName}: ${notes}`,
   },
   CANCELLATION_REQUESTED: {
-    staff: [ADMIN_ENTIDADE, FATURACAO],
+    staff: [ADMIN_ENTIDADE, FINANCAS],
     title: (p) => `Pedido de cancelamento — ${p.reference}`,
     body: (p, notes) => `${p.forwarderName}: ${notes}`,
   },
@@ -103,7 +109,7 @@ const EVENTS = {
   AUTHORIZATION_REVOKED: {
     forwarder: true,
     title: (p) => `Autorização revogada — ${p.reference}`,
-    body: (_p, notes) => notes || 'A autorização foi revogada e o processo voltou à análise.',
+    body: (_p, notes) => notes || 'A autorização foi revogada.',
   },
   DEADLINE_EXTENDED: {
     forwarder: true,
@@ -122,7 +128,7 @@ const EVENTS = {
   },
   PAYMENT_OVERDUE: {
     forwarder: true,
-    staff: [FATURACAO, ADMIN_ENTIDADE],
+    staff: [FINANCAS, ADMIN_ENTIDADE],
     title: (p, audience) => (audience === 'staff' ? `Pagamento em atraso — ${p.reference}` : `Prazo de pagamento ultrapassado — ${p.reference}`),
     body: (p, _n, audience) =>
       audience === 'staff'

@@ -94,11 +94,11 @@ test('notificações: destinatários, e-mail, preferências, chat e prazos', asy
     headers: { 'x-setup-token': 'test-setup-token' },
   });
   const admin = await login('dir@cabinda.ao', 'Senha1234');
-  for (const [name, role] of [['Loja', 'LOJA'], ['Fat', 'FATURACAO']]) {
+  for (const [name, role] of [['Loja', 'LOJA'], ['Fat', 'FINANCAS']]) {
     await api('POST', '/users', { token: admin, body: { name, email: `${role.toLowerCase()}@cabinda.ao`, password: 'Senha1234', role } });
   }
   const loja = await login('loja@cabinda.ao', 'Senha1234');
-  const fat = await login('faturacao@cabinda.ao', 'Senha1234');
+  const fat = await login('financas@cabinda.ao', 'Senha1234');
 
   const mkForwarder = async (n) => {
     const r = await api('POST', '/forwarders', {
@@ -229,8 +229,8 @@ test('notificações: destinatários, e-mail, preferências, chat e prazos', asy
   assert.equal((await unreadMsgs(admin)).length, 1);
   assert.ok((await inbox(admin)).notifications.some((n) => n.type === 'COMMITMENT_SIGNED'));
   await step(loja, `/processes/${per.id}/transition`, 200, { body: { status: 'EM_ANALISE' } });
-  await step(loja, `/processes/${per.id}/authorization`, 201, { body: {} });
-  assert.ok((await inbox(fat)).notifications.some((n) => n.type === 'AUTHORIZATION_ISSUED' && /proforma/i.test(n.title)));
+  await step(admin, `/processes/${per.id}/authorization`, 201, { body: {} });
+  assert.ok((await inbox(fat)).notifications.some((n) => n.type === 'AUTHORIZATION_ISSUED' && /saída antecipada/i.test(n.title)));
   assert.ok((await inbox(fwdA)).notifications.some((n) => n.type === 'AUTHORIZATION_ISSUED'));
 
   assert.deepEqual(await runPaymentChecks(), { dueSoon: 0, overdue: 0 }); // prazo de 3 dias: ainda longe

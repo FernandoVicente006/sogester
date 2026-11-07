@@ -64,11 +64,11 @@ test('chat por processo: acesso, anexos, não lidas e encerramento', async () =>
     headers: setupHeaders,
   });
   const admin = await login('dir@cabinda.ao', 'Senha1234');
-  for (const [name, role] of [['Loja', 'LOJA'], ['Fat', 'FATURACAO']]) {
+  for (const [name, role] of [['Loja', 'LOJA'], ['Fat', 'FINANCAS']]) {
     await api('POST', '/users', { token: admin, body: { name, email: `${role.toLowerCase()}@cabinda.ao`, password: 'Senha1234', role } });
   }
   const loja = await login('loja@cabinda.ao', 'Senha1234');
-  const fat = await login('faturacao@cabinda.ao', 'Senha1234');
+  const fat = await login('financas@cabinda.ao', 'Senha1234');
 
   const mkForwarder = async (n) => {
     const r = await api('POST', '/forwarders', {
@@ -108,6 +108,7 @@ test('chat por processo: acesso, anexos, não lidas e encerramento', async () =>
   fd.append('bilhete', PDF(), 'bilhete.pdf');
   const p = (await api('POST', '/processes', { token: fwdA, form: fd })).body.process;
   const base_ = `/processes/${p.id}/messages`;
+  assert.equal((await api('GET', `${base_}?after=0`, { token: fwdA })).status, 200, 'conversa vazia: a atualização periódica usa after=0');
 
   // --- envio e validações
   const first = await api('POST', base_, { token: fwdA, form: msg('Bom dia, segue o processo.') });
