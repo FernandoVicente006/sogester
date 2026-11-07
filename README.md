@@ -22,10 +22,9 @@ Camada digital entre transitários e a Sogester (terminais de Cabinda, Soyo e Lu
   transitários de cada mudança de estado, e todos dos prazos de pagamento (lembrete 24 h antes e alerta de atraso).
   Mensagens do chat agrupam-se numa notificação por destinatário. Configure `SMTP_*`, `MAIL_FROM` e `APP_URL`
   em `server/.env`; sem `SMTP_HOST` ficam só na plataforma.
-- Passo 6: cancelamento e exceções. O transitário cancela de imediato antes da autorização; depois dela pede e a
-  Sogester (administrador ou Finanças) decide. Não se cancela com comprovativo por validar, com pagamento confirmado
-  nem com saída antecipada (a dívida não se apaga). Exceções do administrador: cancelar, revogar autorização
-  (só antes da proforma; o código fica inválido), prorrogar o prazo de pagamento (máx. 2×, até 7 dias, sempre
+- Passo 6: cancelamento e exceções. O transitário ou o administrador só cancelam até os documentos serem aprovados;
+  depois da aprovação documental o processo segue até ao fim, e nunca se cancela com saída antecipada ativa (a dívida
+  não se apaga). Exceções do administrador: revogar a saída antecipada (o código fica inválido), prorrogar o prazo de pagamento (máx. 2×, até 7 dias, sempre
   justificado) e reabrir processos rejeitados. Tudo fica no histórico/auditoria e o transitário é notificado.
 - Passo 7: relatórios (/relatorios) com exportação CSV e impressão/PDF. Processos (estados, prioridades, tempos
   médios até autorizar e concluir; todo o pessoal), Receita (faturado, cobrado e em aberto por mês e transitário) e
@@ -55,7 +54,8 @@ Esta ordem é um pressuposto a confirmar com a Sogester (ver "Pontos em aberto" 
 ## Fluxo de inicialização
 
 1. Super admin (`SEED_SUPERADMIN_*`) ativa as entidades (só Cabinda vem ativa).
-2. Em `/setup`, o diretor-geral cria o seu acesso com o `SETUP_TOKEN`; fica vinculado ao terminal escolhido.
+2. Em `/setup`, o diretor-geral cria o seu acesso com o `SETUP_TOKEN`; fica vinculado ao terminal escolhido. Só aparecem
+   terminais ativos sem administrador; sem nenhum, a opção desaparece do início de sessão e o `/setup` fica fechado.
 3. O administrador da entidade cria funcionários (Loja, Cadastro, Finanças de processos, Chefe comercial, Portaria) e o Cadastro regista transitários.
 4. Cada entidade aprova/rejeita o transitário separadamente; um transitário pode operar em vários terminais.
 

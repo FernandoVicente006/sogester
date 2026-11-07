@@ -147,50 +147,23 @@ test('cancelamento de processos e exceções após a autorização', async () =>
   assert.equal((await api('GET', '/processes/stats', { token: loja })).body.stats.cancelled, 1);
   assert.equal((await api('GET', '/processes/stats', { token: loja })).body.stats.active, 0);
 
-  // =========== pedido de cancelamento depois de os documentos estarem conformes ===========
+  // =========== depois da aprovação documental já não se cancela ===========
   const p2 = await submit(fwdA);
   await approve(p2.id);
-  const requested = await ok(fwdA, p2.id, '/cancellation', { reason: 'O cliente cancelou o negócio' });
-  assert.equal(requested.status, 'EM_PROCESSAMENTO_INTERNO', 'o processo só muda quando a Sogester decide');
-  assert.equal(requested.cancellationRequest.status, 'PENDENTE');
-  assert.equal(await code(fwdA, p2.id, '/cancellation', { reason: 'Pedido repetido' }), 'ALREADY_REQUESTED');
-  for (const t of [admin, fat]) assert.ok((await inbox(t)).includes('CANCELLATION_REQUESTED'));
-  assert.ok(!(await inbox(loja)).includes('CANCELLATION_REQUESTED'));
+  assert.equal(await code(fwdA, p2.id, '/cancellation', { reason: 'O cliente cancelou o negócio' }), 'NOT_CANCELLABLE');
+  assert.equal(await code(admin, p2.id, '/cancel', { reason: 'Cancelamento administrativo' }), 'NOT_CANCELLABLE');
+  assert.equal((await get(admin, p2.id)).status, 'EM_PROCESSAMENTO_INTERNO');
+  assert.equal((await post(fat, p2.id, '/cancellation/decision', { approve: true })).status, 404, 'já não há pedidos de cancelamento');
 
-  assert.equal((await post(loja, p2.id, '/cancellation/decision', { approve: true })).status, 403);
-  assert.equal((await post(fwdA, p2.id, '/cancellation/decision', { approve: true })).status, 403);
-  assert.equal(await code(fat, p2.id, '/cancellation/decision', { approve: false }), 'NOTES_REQUIRED');
-  const denied = await ok(fat, p2.id, '/cancellation/decision', { approve: false, notes: 'A mercadoria já está no porto' });
-  assert.equal(denied.status, 'EM_PROCESSAMENTO_INTERNO');
-  assert.equal(denied.cancellationRequest.status, 'RECUSADO');
-  assert.ok((await inbox(fwdA)).includes('CANCELLATION_DENIED'));
-  assert.equal(await code(fat, p2.id, '/cancellation/decision', { approve: true }), 'NO_PENDING_REQUEST');
-
-  await ok(fwdA, p2.id, '/cancellation', { reason: 'Insisto: o cliente desistiu' }); // novo pedido após recusa
-  const approved = await ok(fat, p2.id, '/cancellation/decision', { approve: true, notes: 'Aprovado' });
-  assert.equal(approved.status, 'CANCELADO');
-  assert.equal(approved.cancellationRequest.status, 'APROVADO');
-  assert.ok((await inbox(fwdA)).includes('CANCELLATION_APPROVED'));
-
-  // =========== comprovativo por validar bloqueia o cancelamento ===========
   const p3 = await submit(fwdA);
   await approve(p3.id);
   assert.equal((await proforma(p3.id)).status, 200);
+  assert.equal(await code(fwdA, p3.id, '/cancellation', { reason: 'Quero cancelar a proforma' }), 'NOT_CANCELLABLE');
   assert.equal((await proof(p3.id)).status, 200);
-  await ok(fwdA, p3.id, '/cancellation', { reason: 'Quero cancelar este processo' });
-  assert.equal(await code(fat, p3.id, '/cancellation/decision', { approve: true }), 'PAYMENT_UNDER_REVIEW');
-  assert.equal(await code(admin, p3.id, '/cancel', { reason: 'Cancelamento administrativo' }), 'PAYMENT_UNDER_REVIEW');
-  await ok(fat, p3.id, '/reject-payment', { notes: 'Comprovativo ilegível' });
-  assert.equal((await ok(fat, p3.id, '/cancellation/decision', { approve: true })).status, 'CANCELADO');
-
-  // =========== pagamento confirmado: já não se cancela ===========
-  const p4 = await submit(fwdA);
-  await approve(p4.id);
-  await proforma(p4.id);
-  await proof(p4.id);
-  await ok(fat, p4.id, '/confirm-payment', {});
-  assert.equal(await code(fwdA, p4.id, '/cancellation', { reason: 'Já paguei mas desisti' }), 'NOT_CANCELLABLE');
-  assert.equal(await code(admin, p4.id, '/cancel', { reason: 'Cancelamento administrativo' }), 'NOT_CANCELLABLE');
+  assert.equal(await code(admin, p3.id, '/cancel', { reason: 'Cancelamento administrativo' }), 'NOT_CANCELLABLE');
+  await ok(fat, p3.id, '/confirm-payment', {});
+  assert.equal(await code(fwdA, p3.id, '/cancellation', { reason: 'Já paguei mas desisti' }), 'NOT_CANCELLABLE');
+  assert.equal(await code(admin, p3.id, '/cancel', { reason: 'Cancelamento administrativo' }), 'NOT_CANCELLABLE');
 
   // =========== saída antecipada: dívida não se apaga; prorrogação limitada ===========
   const per = await submit(fwdA, { cargoPriority: 'PERECIVEL', cargoCategory: 'Mercadoria frigorífica ou congelada', description: 'Peixe' });
@@ -267,13 +240,11 @@ test('cancelamento de processos e exceções após a autorização', async () =>
   assert.equal(reopened.status, 'EM_ANALISE');
   assert.ok((await inbox(fwdA)).includes('PROCESS_REOPENED'));
 
-  // cancelamento administrativo (antes do pagamento) com pedido pendente a ser fechado
+  // cancelamento administrativo enquanto os documentos estão em análise
   const p8 = await submit(fwdA);
-  await approve(p8.id);
-  await ok(fwdA, p8.id, '/cancellation', { reason: 'Pedido do transitário' });
+  await ok(loja, p8.id, '/transition', { status: 'EM_ANALISE' });
   const staffCancelled = await ok(admin, p8.id, '/cancel', { reason: 'Importação suspensa pela Sogester' });
   assert.equal(staffCancelled.status, 'CANCELADO');
-  assert.equal(staffCancelled.cancellationRequest.status, 'APROVADO');
   assert.ok((await inbox(fwdA)).includes('PROCESS_CANCELLED'));
   assert.equal((await post(loja, p8.id, '/cancel', { reason: 'Loja não pode cancelar' })).status, 403);
 });

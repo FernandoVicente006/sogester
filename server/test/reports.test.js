@@ -158,7 +158,8 @@ test('relatórios: processos, receita e atrasos (filtros, permissões e CSV)', a
   const p6 = await submit(fwdB);
   await approve(p6.id);
   await proforma(p6.id, 999);
-  await post(admin, p6.id, '/cancel', { body: { reason: 'Importação suspensa pela Sogester' } });
+  // Já não se cancela depois da aprovação documental: simula um cancelamento antigo.
+  await pool.query("UPDATE processes SET status = 'CANCELADO' WHERE id = ?", [p6.id]);
 
   // p7: proforma sem valor (opcional) fica fora dos totais
   const p7 = await submit(fwdB);

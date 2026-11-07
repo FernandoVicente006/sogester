@@ -5,8 +5,8 @@ import { audit } from './audit.js';
 const SELECT = 'SELECT id, code, name, location, active FROM entities';
 const map = (e) => ({ ...e, active: !!e.active });
 
-export async function listEntities({ onlyActive = false } = {}) {
-  const rows = await query(`${SELECT} ${onlyActive ? 'WHERE active = 1' : ''} ORDER BY id`);
+export async function listEntities() {
+  const rows = await query(`${SELECT} ORDER BY id`);
   return rows.map(map);
 }
 

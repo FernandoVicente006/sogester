@@ -86,21 +86,6 @@ const EVENTS = {
     title: (p) => `Processo ${p.reference} cancelado pelo transitário`,
     body: (p, notes) => `${p.forwarderName}: ${notes}`,
   },
-  CANCELLATION_REQUESTED: {
-    staff: [ADMIN_ENTIDADE, FINANCAS],
-    title: (p) => `Pedido de cancelamento — ${p.reference}`,
-    body: (p, notes) => `${p.forwarderName}: ${notes}`,
-  },
-  CANCELLATION_APPROVED: {
-    forwarder: true,
-    title: (p) => `Cancelamento aprovado — ${p.reference}`,
-    body: (_p, notes) => notes || 'O processo foi cancelado a seu pedido.',
-  },
-  CANCELLATION_DENIED: {
-    forwarder: true,
-    title: (p) => `Cancelamento recusado — ${p.reference}`,
-    body: (_p, notes) => notes || 'O pedido de cancelamento foi recusado.',
-  },
   PROCESS_CANCELLED: {
     forwarder: true,
     title: (p) => `Processo ${p.reference} cancelado pela Sogester`,

@@ -58,6 +58,7 @@ test('fluxo completo: entidades, perfis e transitários', async () => {
   const setup = await api('POST', '/setup/entity-admin', { body: setupBody, headers: { 'x-setup-token': 'test-setup-token' } });
   assert.equal(setup.status, 201);
   assert.equal(setup.body.user.role, 'ADMIN_ENTIDADE');
+  assert.deepEqual((await api('GET', '/setup/status')).body, { available: false, entities: [] }, 'terminal ocupado deixa de aparecer');
 
   const again = await api('POST', '/setup/entity-admin', {
     body: { ...setupBody, email: 'outro@cabinda.ao' },
@@ -142,11 +143,15 @@ test('fluxo completo: entidades, perfis e transitários', async () => {
   assert.equal((await api('PATCH', '/entities/2', { token: superToken, body: { active: true } })).status, 200);
   assert.equal((await api('PATCH', '/entities/2', { token: adminToken, body: { active: false } })).status, 403);
 
+  const open = (await api('GET', '/setup/status')).body;
+  assert.equal(open.available, true);
+  assert.deepEqual(open.entities.map((e) => e.code), ['SOYO'], 'só terminais ativos e sem administrador');
   await api('POST', '/setup/entity-admin', {
     body: { entityCode: 'SOYO', name: 'Diretor Soyo', email: 'dir@soyo.ao', password: 'Senha1234' },
     headers: { 'x-setup-token': 'test-setup-token' },
   });
   const soyoToken = await login('dir@soyo.ao', 'Senha1234');
+  assert.equal((await api('GET', '/setup/status')).body.available, false);
 
   assert.equal((await api('GET', `/forwarders/${fwd.id}`, { token: soyoToken })).status, 404);
   assert.deepEqual((await api('GET', '/forwarders', { token: soyoToken })).body.forwarders, []);

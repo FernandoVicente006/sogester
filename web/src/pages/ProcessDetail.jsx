@@ -78,12 +78,10 @@ const REVIEWERS = ['SUPER_ADMIN', 'ADMIN_ENTIDADE', 'LOJA']
 const PRE_AUTH = ['SUBMETIDO', 'EM_ANALISE', 'DOCUMENTOS_PENDENTES', 'DOCUMENTOS_SUBMETIDOS']
 const POST_AUTH = ['EM_PROCESSAMENTO_INTERNO', 'PAGAMENTO_PENDENTE', 'PAGAMENTO_SUBMETIDO']
 const ADMINS = ['SUPER_ADMIN', 'ADMIN_ENTIDADE']
-const CANCEL_DECIDERS = ['SUPER_ADMIN', 'ADMIN_ENTIDADE', 'FINANCAS']
 
 // Cada ação com motivo obrigatório: título, rótulo do campo, endpoint e se é destrutiva.
 const DIALOGS = {
   withdraw: { title: 'Cancelar processo', label: 'Motivo do cancelamento', path: '/cancellation', confirm: 'Cancelar processo', danger: true, hint: 'O processo será cancelado de imediato.' },
-  request: { title: 'Pedir cancelamento', label: 'Motivo do pedido', path: '/cancellation', confirm: 'Enviar pedido', hint: 'A Sogester analisa o pedido e decide. O processo mantém-se até lá.' },
   staffCancel: { title: 'Cancelar processo', label: 'Motivo do cancelamento', path: '/cancel', confirm: 'Cancelar processo', danger: true, hint: 'O transitário será informado.' },
   revoke: { title: 'Revogar autorização', label: 'Motivo da revogação', path: '/authorization/revoke', confirm: 'Revogar autorização', danger: true, hint: 'O código deixa de ser válido e o prazo de pagamento é retirado.' },
   extend: { title: 'Prorrogar prazo de pagamento', label: 'Justificação', path: '/extend-deadline', confirm: 'Prorrogar', days: true, hint: 'Máximo de 2 prorrogações por compromisso, até 7 dias cada.' },
@@ -140,7 +138,7 @@ export default function ProcessDetail() {
   const isFinance = FINANCE.includes(user.role)
   const earlyRelease = p.authorization?.type === 'SAIDA_ANTECIPADA'
   const exceptionActions = [
-    (PRE_AUTH.includes(p.status) || POST_AUTH.includes(p.status)) && p.status !== 'PAGAMENTO_SUBMETIDO' && !earlyRelease && ['staffCancel', 'Cancelar processo'],
+    PRE_AUTH.includes(p.status) && !earlyRelease && ['staffCancel', 'Cancelar processo'],
     p.authorization && (PRE_AUTH.includes(p.status) || POST_AUTH.includes(p.status)) && ['revoke', 'Revogar autorização'],
     p.commitment?.dueAt && p.commitment.extensionsLeft > 0 && !['PAGAMENTO_CONFIRMADO', 'CONCLUIDO', 'CANCELADO'].includes(p.status) && ['extend', 'Prorrogar prazo de pagamento'],
     p.status === 'REJEITADO' && ['reopen', 'Reabrir processo'],
@@ -156,11 +154,6 @@ export default function ProcessDetail() {
     const body = cfg.days ? { days: Number(dialogDays), reason: dialogReason } : { reason: dialogReason }
     post(cfg.path, { body })
     setDialog(null)
-  }
-  const decideCancellation = (approve) => {
-    if (!approve && !notes.trim()) return setError('Indique o motivo para recusar o pedido.')
-    post('/cancellation/decision', { body: { approve, notes: notes.trim() || undefined } })
-    setNotes('')
   }
   const post = (path, options) => run(() => api('POST', `/processes/${id}${path}`, options))
   const formWith = (data, fileField, file) => {
@@ -443,55 +436,16 @@ export default function ProcessDetail() {
         </section>
       )}
 
-      {isForwarder && !['CONCLUIDO', 'REJEITADO', 'CANCELADO', 'PAGAMENTO_CONFIRMADO'].includes(p.status) && (
+      {isForwarder && PRE_AUTH.includes(p.status) && !earlyRelease && (
         <section className="card stack">
           <h3>
             <Icon name="x" /> Cancelamento
           </h3>
-          {p.cancellationRequest?.status === 'PENDENTE' ? (
-            <p className="notice">
-              <Icon name="clock" /> Pedido de cancelamento enviado em {formatDate(p.cancellationRequest.requestedAt)}: a aguardar a decisão da Sogester.
-            </p>
-          ) : p.authorization?.type === 'SAIDA_ANTECIPADA' ? (
-            <p className="muted">Carga libertada com compromisso de pagamento: não é possível cancelar. Liquide a proforma dentro do prazo.</p>
-          ) : (
-            <>
-              {p.cancellationRequest?.status === 'RECUSADO' && (
-                <p className="notice">
-                  <Icon name="alert" /> O último pedido foi recusado{p.cancellationRequest.decisionNotes ? ': ' + p.cancellationRequest.decisionNotes : '.'}
-                </p>
-              )}
-              <div>
-                <button className="danger" onClick={() => openDialog(PRE_AUTH.includes(p.status) ? 'withdraw' : 'request')}>
-                  {PRE_AUTH.includes(p.status) ? 'Cancelar processo' : 'Pedir cancelamento'}
-                </button>
-              </div>
-            </>
-          )}
-        </section>
-      )}
-
-      {p.cancellationRequest?.status === 'PENDENTE' && CANCEL_DECIDERS.includes(user.role) && (
-        <section className="card stack">
-          <h3>
-            <Icon name="alert" /> Pedido de cancelamento
-          </h3>
-          <p>
-            <strong>{p.cancellationRequest.requestedBy}</strong> · {formatDate(p.cancellationRequest.requestedAt)}
-            <br />
-            {p.cancellationRequest.reason}
-          </p>
-          {p.status === 'PAGAMENTO_SUBMETIDO' && (
-            <p className="notice">Há um comprovativo por validar: confirme ou recuse o pagamento antes de aprovar o cancelamento.</p>
-          )}
-          <Field label="Motivo / nota (obrigatório para recusar)">
-            <input value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={500} />
-          </Field>
-          <div className="actions-left">
-            <button className="danger" disabled={p.status === 'PAGAMENTO_SUBMETIDO'} onClick={() => decideCancellation(true)}>
-              Aprovar cancelamento
+          <p className="muted small">Pode cancelar até os documentos serem aprovados. Depois disso o processo já não pode ser cancelado.</p>
+          <div>
+            <button className="danger" onClick={() => openDialog('withdraw')}>
+              Cancelar processo
             </button>
-            <button onClick={() => decideCancellation(false)}>Recusar pedido</button>
           </div>
         </section>
       )}

@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
-import { errorText } from '../api.js'
+import { api, errorText } from '../api.js'
 import { useAuth } from '../auth.jsx'
 import AuthShell from '../components/AuthShell.jsx'
 import { ErrorBox, Field } from '../components/ui.jsx'
@@ -12,6 +12,13 @@ export default function Login() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [canInitialize, setCanInitialize] = useState(false)
+
+  useEffect(() => {
+    api('GET', '/setup/status')
+      .then((r) => setCanInitialize(r.available))
+      .catch(() => setCanInitialize(false))
+  }, [])
 
   if (user) return <Navigate to="/" replace />
 
@@ -46,9 +53,11 @@ export default function Login() {
         <button className="primary" disabled={busy}>
           {busy ? 'A entrar…' : 'Entrar'}
         </button>
-        <p className="muted small">
-          Primeira utilização de um terminal? <Link to="/setup">Inicializar administrador</Link>
-        </p>
+        {canInitialize && (
+          <p className="muted small">
+            Primeira utilização de um terminal? <Link to="/setup">Inicializar administrador</Link>
+          </p>
+        )}
       </form>
     </AuthShell>
   )

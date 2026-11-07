@@ -256,7 +256,7 @@ export async function processStats(actor) {
 
 export async function getProcess(actor, id) {
   const process = mapProcess(await loadAccessible(actor, id));
-  const [documents, history, commitment, authorization, invoice, cancellation, extensions] = await Promise.all([
+  const [documents, history, commitment, authorization, invoice, extensions] = await Promise.all([
     query(
       `SELECT id, kind, original_name AS originalName, mime_type AS mimeType, size_bytes AS sizeBytes,
               created_at AS createdAt FROM process_documents WHERE process_id = ? ORDER BY id`,
@@ -285,15 +285,6 @@ export async function getProcess(actor, id) {
          FROM invoices WHERE process_id = ?`,
       [id],
     ),
-    queryOne(
-      `SELECT r.id, r.status, r.reason, r.created_at AS requestedAt, r.decision_notes AS decisionNotes,
-              r.decided_at AS decidedAt, u.name AS requestedBy, d.name AS decidedBy
-         FROM cancellation_requests r
-         JOIN users u ON u.id = r.requested_by
-         LEFT JOIN users d ON d.id = r.decided_by
-        WHERE r.process_id = ? ORDER BY r.id DESC LIMIT 1`,
-      [id],
-    ),
     query(
       `SELECT e.days, e.reason, e.new_due_at AS newDueAt, e.created_at AS createdAt, u.name AS extendedBy
          FROM commitment_extensions e
@@ -309,7 +300,6 @@ export async function getProcess(actor, id) {
     documents,
     history,
     commitment: commitment ? { ...commitment, extensions, extensionsLeft: Math.max(0, MAX_EXTENSIONS - commitment.extensionCount) } : null,
-    cancellationRequest: cancellation ?? null,
     authorization: authorization ?? null,
     invoice: invoice ? { ...invoice, amount: num(invoice.amount) } : null,
   };

@@ -7,16 +7,16 @@ import { ErrorBox, Field } from '../components/ui.jsx'
 /** Inicialização do administrador (diretor-geral): escolhe o terminal, que fica vinculado em definitivo. */
 export default function Setup() {
   const navigate = useNavigate()
-  const [entities, setEntities] = useState([])
+  const [status, setStatus] = useState(null) // { available, entities }
   const [form, setForm] = useState({ entityCode: '', name: '', email: '', password: '', setupToken: '' })
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }))
 
   useEffect(() => {
-    api('GET', '/entities/public')
+    api('GET', '/setup/status')
       .then((r) => {
-        setEntities(r.entities)
+        setStatus(r)
         setForm((f) => ({ ...f, entityCode: r.entities[0]?.code ?? '' }))
       })
       .catch((err) => setError(errorText(err)))
@@ -37,6 +37,22 @@ export default function Setup() {
     }
   }
 
+  if (status && !status.available) {
+    return (
+      <AuthShell>
+        <div className="auth">
+          <div>
+            <h1>Inicialização concluída</h1>
+            <p className="muted">Todos os terminais já têm administrador. Novos acessos são criados dentro da plataforma.</p>
+          </div>
+          <p className="muted small">
+            <Link to="/login">Voltar ao início de sessão</Link>
+          </p>
+        </div>
+      </AuthShell>
+    )
+  }
+
   return (
     <AuthShell>
     <form className="auth" onSubmit={submit}>
@@ -48,7 +64,7 @@ export default function Setup() {
       </div>
       <Field label="Terminal">
         <select value={form.entityCode} onChange={set('entityCode')} required>
-          {entities.map((en) => (
+          {status?.entities.map((en) => (
             <option key={en.id} value={en.code}>
               {en.name}
             </option>

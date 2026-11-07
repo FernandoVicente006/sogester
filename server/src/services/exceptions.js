@@ -1,11 +1,11 @@
 import { queryOne, withTransaction } from '../db/pool.js';
-import { badRequest, conflict, forbidden } from '../errors.js';
+import { conflict, forbidden } from '../errors.js';
 import { isForwarder } from '../roles.js';
 import { audit } from './audit.js';
 import { notifyProcessEvent } from './notifications.js';
 import { MAX_EXTENSIONS, changeStatus, getProcess, loadAccessible } from './processes.js';
 
-/** Até os documentos estarem conformes o transitário desiste sozinho; depois, só com decisão da Sogester. */
+/** Só se cancela até os documentos estarem conformes; depois da aprovação documental o processo segue até ao fim. */
 const BEFORE_APPROVAL = ['SUBMETIDO', 'EM_ANALISE', 'DOCUMENTOS_PENDENTES', 'DOCUMENTOS_SUBMETIDOS'];
 const AFTER_APPROVAL = ['EM_PROCESSAMENTO_INTERNO', 'PAGAMENTO_PENDENTE', 'PAGAMENTO_SUBMETIDO'];
 const PAID = ['PAGAMENTO_CONFIRMADO', 'CONCLUIDO'];
@@ -21,93 +21,33 @@ async function assertNotEarlyRelease(processId) {
   }
 }
 
-const closeProcess = async (conn, actor, process, notes) => {
-  await changeStatus(actor, process, 'CANCELADO', notes, conn);
-};
-
 // ---- cancelamento -------------------------------------------------------------------------
-/**
- * Transitário: cancela de imediato enquanto os documentos estão em análise; depois cria um pedido para a Sogester decidir.
- */
-export async function cancelOrRequest(actor, id, { reason }) {
+async function assertCancellable(process) {
+  if (!BEFORE_APPROVAL.includes(process.status)) {
+    throw conflict('Depois da aprovação documental o processo já não pode ser cancelado', 'NOT_CANCELLABLE');
+  }
+  await assertNotEarlyRelease(process.id);
+}
+
+/** Transitário: desiste do processo enquanto os documentos estão em análise. */
+export async function withdrawProcess(actor, id, { reason }) {
   if (!isForwarder(actor)) throw forbidden();
   const process = await loadAccessible(actor, id);
-  await assertNotEarlyRelease(id);
-
-  if (BEFORE_APPROVAL.includes(process.status)) {
-    await withTransaction(async (conn) => {
-      await closeProcess(conn, actor, process, reason);
-      await audit(actor, 'PROCESS_WITHDRAWN', 'process', id, { entityId: process.entityId, details: { reason }, conn });
-    });
-    await notifyProcessEvent('PROCESS_WITHDRAWN', process, { actor, notes: reason });
-    return getProcess(actor, id);
-  }
-
-  if (!AFTER_APPROVAL.includes(process.status)) {
-    throw conflict('Este processo já não pode ser cancelado', 'NOT_CANCELLABLE');
-  }
-  if (await queryOne("SELECT id FROM cancellation_requests WHERE process_id = ? AND status = 'PENDENTE'", [id])) {
-    throw conflict('Já existe um pedido de cancelamento pendente', 'ALREADY_REQUESTED');
-  }
+  await assertCancellable(process);
   await withTransaction(async (conn) => {
-    await conn.query('INSERT INTO cancellation_requests (process_id, requested_by, reason) VALUES (?, ?, ?)', [id, actor.id, reason]);
-    await audit(actor, 'CANCELLATION_REQUESTED', 'process', id, { entityId: process.entityId, details: { reason }, conn });
+    await changeStatus(actor, process, 'CANCELADO', reason, conn);
+    await audit(actor, 'PROCESS_WITHDRAWN', 'process', id, { entityId: process.entityId, details: { reason }, conn });
   });
-  await notifyProcessEvent('CANCELLATION_REQUESTED', process, { actor, notes: reason });
+  await notifyProcessEvent('PROCESS_WITHDRAWN', process, { actor, notes: reason });
   return getProcess(actor, id);
 }
 
-/** Sogester decide o pedido: aprovar cancela o processo; recusar exige motivo e deixa tudo como estava. */
-export async function decideCancellation(actor, id, { approve, notes }) {
-  const process = await loadAccessible(actor, id);
-  const request = await queryOne("SELECT id FROM cancellation_requests WHERE process_id = ? AND status = 'PENDENTE'", [id]);
-  if (!request) throw conflict('Não há pedido de cancelamento pendente', 'NO_PENDING_REQUEST');
-
-  if (approve) {
-    if (process.status === 'PAGAMENTO_SUBMETIDO') {
-      throw conflict('Há um comprovativo por validar: confirme ou recuse o pagamento antes de cancelar', 'PAYMENT_UNDER_REVIEW');
-    }
-    if (!AFTER_APPROVAL.includes(process.status)) throw conflict('Este processo já não pode ser cancelado', 'NOT_CANCELLABLE');
-    await assertNotEarlyRelease(id);
-  } else if (!notes) {
-    throw badRequest('Indique o motivo da recusa', 'NOTES_REQUIRED');
-  }
-
-  await withTransaction(async (conn) => {
-    await conn.query('UPDATE cancellation_requests SET status = ?, decided_by = ?, decided_at = NOW(), decision_notes = ? WHERE id = ?', [
-      approve ? 'APROVADO' : 'RECUSADO',
-      actor.id,
-      notes ?? null,
-      request.id,
-    ]);
-    if (approve) await closeProcess(conn, actor, process, notes ?? 'Cancelamento aprovado');
-    await audit(actor, approve ? 'CANCELLATION_APPROVED' : 'CANCELLATION_DENIED', 'process', id, {
-      entityId: process.entityId,
-      details: { notes },
-      conn,
-    });
-  });
-  await notifyProcessEvent(approve ? 'CANCELLATION_APPROVED' : 'CANCELLATION_DENIED', process, { actor, notes });
-  return getProcess(actor, id);
-}
-
-/** Exceção do administrador: cancela por iniciativa da Sogester (antes de confirmar o pagamento). */
+/** Administrador: cancela por iniciativa da Sogester, nas mesmas condições. */
 export async function staffCancel(actor, id, { reason }) {
   const process = await loadAccessible(actor, id);
-  if (process.status === 'PAGAMENTO_SUBMETIDO') {
-    throw conflict('Há um comprovativo por validar: confirme ou recuse o pagamento antes de cancelar', 'PAYMENT_UNDER_REVIEW');
-  }
-  if (![...BEFORE_APPROVAL, ...AFTER_APPROVAL].includes(process.status)) {
-    throw conflict('Este processo já não pode ser cancelado', 'NOT_CANCELLABLE');
-  }
-  await assertNotEarlyRelease(id);
-
+  await assertCancellable(process);
   await withTransaction(async (conn) => {
-    await conn.query(
-      "UPDATE cancellation_requests SET status = 'APROVADO', decided_by = ?, decided_at = NOW(), decision_notes = ? WHERE process_id = ? AND status = 'PENDENTE'",
-      [actor.id, reason, id],
-    );
-    await closeProcess(conn, actor, process, reason);
+    await changeStatus(actor, process, 'CANCELADO', reason, conn);
     await audit(actor, 'PROCESS_CANCELLED', 'process', id, { entityId: process.entityId, details: { reason }, conn });
   });
   await notifyProcessEvent('PROCESS_CANCELLED', process, { actor, notes: reason });

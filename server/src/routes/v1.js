@@ -198,14 +198,14 @@ v1.post('/auth/change-password', authenticate, validate({ body: schemas.changePa
   res.status(204).end();
 });
 
-// Inicialização do administrador de cada entidade (protegida por token de setup)
+// Inicialização do administrador de cada entidade (protegida por token de setup; fecha quando não há terminais por inicializar)
+v1.get('/setup/status', async (_req, res) => res.json(await setup.setupStatus()));
 v1.post('/setup/entity-admin', loginLimiter, validate({ body: schemas.setup }), async (req, res) => {
   const user = await setup.createEntityAdmin(req.get('x-setup-token'), req.valid.body);
   res.status(201).json({ user });
 });
 
-// Entidades: lista pública das ativas (ecrã de inicialização); gestão só para super admin
-v1.get('/entities/public', async (_req, res) => res.json({ entities: await entities.listEntities({ onlyActive: true }) }));
+// Entidades: gestão só para super admin
 v1.get('/entities', authenticate, async (req, res) => {
   const all = await entities.listEntities();
   res.json({ entities: req.user.role === SUPER_ADMIN ? all : all.filter((e) => e.id === req.user.entityId) });
@@ -516,14 +516,7 @@ v1.patch('/auth/preferences', authenticate, validate({ body: z.object({ emailNot
 // ---- cancelamento e exceções ----------------------------------------------------------------
 const EXCEPTION_ADMINS = [SUPER_ADMIN, ADMIN_ENTIDADE];
 const process_ = (fn) => async (req, res) => res.json({ process: await fn(req.user, req.valid.params.id, req.valid.body) });
-v1.post('/processes/:id/cancellation', authenticate, requireRole(TRANSITARIO), validate({ params: idParam, body: schemas.reason }), process_(exceptions.cancelOrRequest));
-v1.post(
-  '/processes/:id/cancellation/decision',
-  authenticate,
-  requireRole(SUPER_ADMIN, ADMIN_ENTIDADE, FINANCAS),
-  validate({ params: idParam, body: schemas.cancellationDecision }),
-  process_(exceptions.decideCancellation),
-);
+v1.post('/processes/:id/cancellation', authenticate, requireRole(TRANSITARIO), validate({ params: idParam, body: schemas.reason }), process_(exceptions.withdrawProcess));
 v1.post('/processes/:id/cancel', authenticate, requireRole(...EXCEPTION_ADMINS), validate({ params: idParam, body: schemas.reason }), process_(exceptions.staffCancel));
 v1.post('/processes/:id/authorization/revoke', authenticate, requireRole(...EXCEPTION_ADMINS), validate({ params: idParam, body: schemas.reason }), process_(exceptions.revokeAuthorization));
 v1.post('/processes/:id/extend-deadline', authenticate, requireRole(...EXCEPTION_ADMINS), validate({ params: idParam, body: schemas.extendDeadline }), process_(exceptions.extendDeadline));
