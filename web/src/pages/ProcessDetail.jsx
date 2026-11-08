@@ -62,7 +62,7 @@ const money = (amount, currency) => new Intl.NumberFormat('pt-AO', { style: 'cur
 const historyLabel = (status) => (status === 'AUTORIZACAO_EMITIDA' ? 'Autorização emitida' : (PROCESS_STATUS_LABELS[status] ?? status))
 /** Só envia os campos preenchidos: na proforma e no recibo apenas o ficheiro é obrigatório. */
 const filled = (data) => Object.fromEntries(Object.entries(data).filter(([, v]) => v !== '' && v != null))
-const VOLUME_LABELS = { ALTO: 'Alto', CARGA_GRANEL: 'Carga granel', CARGA_GERAL: 'Carga geral', CONTENTOR: 'Contentor' }
+const VOLUME_LABELS = { AUTO: 'Auto', CARGA_GRANEL: 'Carga granel', CARGA_GERAL: 'Carga geral', CONTENTOR: 'Contentor' }
 
 // Transições que a Sogester pode fazer a partir de cada estado (espelha o servidor).
 const STAFF_ACTIONS = {
@@ -244,16 +244,126 @@ export default function ProcessDetail() {
           {row('Documento do cliente', p.client.documentNumber)}
           {row('Prioridade', PRIORITY_LABELS[p.cargoPriority])}
           {p.urgencyRequested && row('Urgência', p.urgencyReason)}
-          {row('Tipo de volume', VOLUME_LABELS[p.volumeType])}
+          {row('Tipo principal de volume', VOLUME_LABELS[p.volumeType])}
           {p.cargoCategory && row('Tipo de carga', p.cargoCategory)}
-          {p.vehicleBrand && row('Veículo', `${p.vehicleBrand} ${p.vehicleModel}`)}
           {p.description && row('Descrição', p.description)}
-          {p.quantity != null && row('Quantidade', p.quantity)}
-          {p.weightKg != null && row('Peso (kg)', p.weightKg)}
-          {p.containerPlate && row('Contentor', `${p.containerPlate} · ${p.containerType} · ${p.containerVolume} m³ · ${p.containerWeightKg} kg`)}
           {row('Submetido em', formatDate(p.submittedAt))}
         </dl>
       </section>
+
+      {p.blNumber && (
+        <section className="card">
+          <h3>
+            <Icon name="truck" /> Transporte
+          </h3>
+          <dl className="details">
+            {row('N.º do B/L', p.blNumber)}
+            {row('N.º do DU', p.duNumber)}
+            {row('Navio / viagem', `${p.vesselName} · ${p.voyageNumber}`)}
+            {row('Tipo de descarga', p.dischargeType === 'DIRECTA' ? 'Directa' : 'Indirecta')}
+            {p.regime && row('Regime', p.regime)}
+            {p.manifestNumber && row('Manifesto', p.manifestNumber)}
+            {p.weightKg != null && row('Peso bruto (kg)', p.weightKg)}
+            {p.packagesCount != null && row('N.º de volumes', p.packagesCount)}
+            {(p.originCountry || p.destinationCountry) && row('Origem / destino', `${p.originCountry ?? '—'} → ${p.destinationCountry ?? '—'}`)}
+          </dl>
+        </section>
+      )}
+
+      {(p.vehicles.length > 0 || p.containers.length > 0 || p.goods.length > 0) && (
+        <section className="card stack">
+          <h3>
+            <Icon name="clipboard" /> Carga
+          </h3>
+          {p.vehicles.length > 0 && (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Veículo</th>
+                    <th>Chassi</th>
+                    <th>Combustível</th>
+                    <th>Posição pautal</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {p.vehicles.map((v) => (
+                    <tr key={v.id}>
+                      <td>{v.brand} {v.model}</td>
+                      <td>{v.chassis ?? '—'}</td>
+                      <td>{v.fuel ?? '—'}</td>
+                      <td>{v.tariffCode ?? '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {p.containers.length > 0 && (
+            <>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Contentor</th>
+                      <th>Pés</th>
+                      <th>Tipo</th>
+                      <th>Estado</th>
+                      <th>Selo</th>
+                      <th className="num">Volumes</th>
+                      <th className="num">Peso (kg)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {p.containers.map((c) => (
+                      <tr key={c.id}>
+                        <td>{c.number}</td>
+                        <td>{c.size ? `${c.size}'` : '—'}</td>
+                        <td>{c.type ?? '—'}</td>
+                        <td>{c.loadStatus === 'CHEIO' ? 'Cheio' : c.loadStatus === 'VAZIO' ? 'Vazio' : '—'}</td>
+                        <td>{c.seal ?? '—'}</td>
+                        <td className="num">{c.packages ?? '—'}</td>
+                        <td className="num">{c.weightKg ?? '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="muted small">
+                Contentores de 20&apos;: {p.containerTotals['20']} · 40&apos;: {p.containerTotals['40']} · 45&apos;: {p.containerTotals['45']}
+              </p>
+            </>
+          )}
+          {p.goods.length > 0 && (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Mercadoria</th>
+                    <th className="num">Quantidade</th>
+                    <th className="num">Peso (kg)</th>
+                    <th>Código pautal</th>
+                    <th>Transportada em</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {p.goods.map((g, i) => (
+                    <tr key={i}>
+                      <td>{g.description}</td>
+                      <td className="num">
+                        {g.quantity} {g.unit}
+                      </td>
+                      <td className="num">{g.weightKg ?? '—'}</td>
+                      <td>{g.tariffCode ?? '—'}</td>
+                      <td>{g.vehicleName ? `${g.vehicleName}${g.vehicleChassis ? ` (${g.vehicleChassis})` : ''}` : (g.containerNumber ?? 'Solta')}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
 
       {actions.length > 0 && (
         <section className="card stack">

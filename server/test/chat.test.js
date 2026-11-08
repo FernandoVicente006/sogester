@@ -92,8 +92,13 @@ test('chat por processo: acesso, anexos, não lidas e encerramento', async () =>
       volumeType: 'CARGA_GERAL',
       cargoCategory: 'Mercadoria fracionada',
       description: 'Caixas',
-      quantity: 1,
+      blNumber: 'BL-88626',
+      duNumber: '2026R6028',
+      vesselName: 'Tchiowa',
+      voyageNumber: '12',
+      dischargeType: 'INDIRECTA',
       weightKg: 10,
+      goods: [{ description: 'Caixas', unit: 'Caixa', quantity: 1 }],
     }),
   );
   fd.append('ep17', PDF(), 'ep17.pdf');

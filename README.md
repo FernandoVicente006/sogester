@@ -26,6 +26,9 @@ Camada digital entre transitários e a Sogester (terminais de Cabinda, Soyo e Lu
   depois da aprovação documental o processo segue até ao fim, e nunca se cancela com saída antecipada ativa (a dívida
   não se apaga). Exceções do administrador: revogar a saída antecipada (o código fica inválido), prorrogar o prazo de pagamento (máx. 2×, até 7 dias, sempre
   justificado) e reabrir processos rejeitados. Tudo fica no histórico/auditoria e o transitário é notificado.
+- Carga: dados de transporte como na nota da JUP (B/L, DU, navio, viagem, tipo de descarga e peso obrigatórios; regime,
+  manifesto, volumes, origem e destino opcionais) e listas de veículos (chassi obrigatório), contentores (totais de 20/40/45
+  pés calculados) e mercadorias; um processo pode misturar tipos e cada mercadoria indica o veículo ou contentor que a leva.
 - Arquivados: processos concluídos, rejeitados e cancelados saem da lista atual para /arquivados (com pesquisa);
   continuam guardados, a numeração não muda e reabrir um rejeitado tira-o do arquivo.
 - Passo 7: relatórios (/relatorios) com exportação CSV e impressão/PDF. Processos (estados, prioridades, tempos

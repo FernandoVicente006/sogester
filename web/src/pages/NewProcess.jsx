@@ -4,8 +4,92 @@ import { api, errorText } from '../api.js'
 import { ErrorBox, Field, Icon, PageHeader } from '../components/ui.jsx'
 
 const EMPTY_CLIENT = { type: 'SINGULAR', name: '', documentNumber: '', isForeign: false, phone: '', email: '', address: '' }
+const EMPTY_TRANSPORT = {
+  blNumber: '',
+  duNumber: '',
+  vesselName: '',
+  voyageNumber: '',
+  dischargeType: 'INDIRECTA',
+  regime: '',
+  manifestNumber: '',
+  weightKg: '',
+  packagesCount: '',
+  originCountry: '',
+  destinationCountry: '',
+}
+const NEW_VEHICLE = () => ({ chassis: '', brand: '', model: '', tariffCode: '', fuel: '' })
+const NEW_CONTAINER = () => ({ number: '', size: '20', type: '', loadStatus: '', seal: '', packages: '', weightKg: '' })
+const NEW_GOOD = () => ({ description: '', tariffCode: '', unit: 'Unidade', quantity: '', weightKg: '', carrier: '' })
 
 const clean = (obj) => Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== '' && v !== undefined))
+const toNumber = (v) => (v === '' ? undefined : Number(v))
+
+/** Lista editável de itens da carga (veículos, contentores ou mercadorias). */
+function ItemList({ title, items, setItems, make, columns, addLabel, empty }) {
+  const update = (i, key, value) => setItems(items.map((it, j) => (j === i ? { ...it, [key]: value } : it)))
+  return (
+    <div className="stack">
+      <div className="items-head">
+        <h4>{title}</h4>
+        <button type="button" onClick={() => setItems([...items, make()])}>
+          <Icon name="plus" /> {addLabel}
+        </button>
+      </div>
+      {items.length === 0 ? (
+        <p className="muted small">{empty}</p>
+      ) : (
+        <div className="table-wrap">
+          <table className="items-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                {columns.map((c) => (
+                  <th key={c.key}>{c.label}</th>
+                ))}
+                <th aria-label="Remover" />
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((it, i) => (
+                <tr key={i}>
+                  <td className="muted">{i + 1}</td>
+                  {columns.map((c) => (
+                    <td key={c.key}>
+                      {c.options ? (
+                        <select value={it[c.key]} onChange={(e) => update(i, c.key, e.target.value)} required={c.required} aria-label={c.label}>
+                          {c.options.map(([value, label]) => (
+                            <option key={value} value={value}>
+                              {label}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          type={c.type ?? 'text'}
+                          min={c.type === 'number' ? '0' : undefined}
+                          step={c.type === 'number' ? 'any' : undefined}
+                          value={it[c.key]}
+                          onChange={(e) => update(i, c.key, e.target.value)}
+                          required={c.required}
+                          aria-label={c.label}
+                        />
+                      )}
+                    </td>
+                  ))}
+                  <td>
+                    <button type="button" className="icon-btn" onClick={() => setItems(items.filter((_, j) => j !== i))} aria-label="Remover">
+                      <Icon name="x" />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
 
 export default function NewProcess() {
   const navigate = useNavigate()
@@ -20,8 +104,11 @@ export default function NewProcess() {
   const [cargoPriority, setCargoPriority] = useState('NAO_PRIORITARIO')
   const [volumeType, setVolumeType] = useState('CARGA_GERAL')
   const [cargoCategory, setCargoCategory] = useState('')
-  const [cargo, setCargo] = useState({ description: '', quantity: '', weightKg: '', vehicleBrand: '', vehicleModel: '' })
-  const [container, setContainer] = useState({ plate: '', type: '', volume: '', weightKg: '' })
+  const [description, setDescription] = useState('')
+  const [transport, setTransport] = useState(EMPTY_TRANSPORT)
+  const [vehicles, setVehicles] = useState([])
+  const [containers, setContainers] = useState([])
+  const [goods, setGoods] = useState([NEW_GOOD()])
   const [urgency, setUrgency] = useState({ requested: false, reason: '' })
   const [files, setFiles] = useState({})
 
@@ -39,12 +126,21 @@ export default function NewProcess() {
 
   const categories = useMemo(() => meta?.volumeTypes.find((v) => v.value === volumeType)?.categories ?? [], [meta, volumeType])
   const isContainer = volumeType === 'CONTENTOR'
-  const isVehicle = cargoCategory.startsWith('Veículos')
 
   const setC = (k) => (e) => setClient((c) => ({ ...c, [k]: e.target.value }))
-  const setCargoField = (k) => (e) => setCargo((c) => ({ ...c, [k]: e.target.value }))
-  const setCont = (k) => (e) => setContainer((c) => ({ ...c, [k]: e.target.value }))
+  const setT = (k) => (e) => setTransport((t) => ({ ...t, [k]: e.target.value }))
   const setFile = (k) => (e) => setFiles((f) => ({ ...f, [k]: e.target.files }))
+
+  // Ao escolher o tipo principal, abre a lista que ele exige (as outras continuam disponíveis).
+  function chooseVolume(value) {
+    setVolumeType(value)
+    setCargoCategory('')
+    if (value === 'CONTENTOR' && !containers.length) setContainers([NEW_CONTAINER()])
+  }
+  function chooseCategory(value) {
+    setCargoCategory(value)
+    if (value.startsWith('Veículos') && !vehicles.length) setVehicles([NEW_VEHICLE()])
+  }
 
   function onDocumentNumber(e) {
     const documentNumber = e.target.value
@@ -56,6 +152,12 @@ export default function NewProcess() {
     )
   }
 
+  const carriers = [
+    ['', 'Solta'],
+    ...vehicles.map((v, i) => [`v${i}`, `Veículo ${i + 1}${v.chassis ? ` (${v.chassis})` : ''}`]),
+    ...containers.map((c, i) => [`c${i}`, `Contentor ${i + 1}${c.number ? ` (${c.number})` : ''}`]),
+  ]
+
   async function submit(e) {
     e.preventDefault()
     setError('')
@@ -65,19 +167,22 @@ export default function NewProcess() {
       client: clean({ ...client, isForeign: client.type === 'EMPRESA' ? client.isForeign : undefined }),
       cargoPriority,
       volumeType,
+      cargoCategory: isContainer ? undefined : cargoCategory,
+      description: description || undefined,
+      ...clean({ ...transport, weightKg: toNumber(transport.weightKg), packagesCount: toNumber(transport.packagesCount) }),
+      vehicles: vehicles.map((v) => clean(v)),
+      containers: containers.map((c) => clean({ ...c, packages: toNumber(c.packages), weightKg: toNumber(c.weightKg) })),
+      goods: goods.map(({ carrier, ...g }) =>
+        clean({
+          ...g,
+          quantity: toNumber(g.quantity),
+          weightKg: toNumber(g.weightKg),
+          vehicle: carrier.startsWith('v') ? Number(carrier.slice(1)) : undefined,
+          container: carrier.startsWith('c') ? Number(carrier.slice(1)) : undefined,
+        }),
+      ),
       urgencyRequested: urgency.requested || undefined,
       urgencyReason: urgency.requested ? urgency.reason || undefined : undefined,
-    }
-    if (isContainer) {
-      data.container = { plate: container.plate, type: container.type, volume: Number(container.volume), weightKg: Number(container.weightKg) }
-    } else {
-      data.cargoCategory = cargoCategory
-      if (isVehicle) Object.assign(data, clean({ vehicleBrand: cargo.vehicleBrand, vehicleModel: cargo.vehicleModel }))
-      else {
-        Object.assign(data, clean({ description: cargo.description }))
-        if (cargo.quantity) data.quantity = Number(cargo.quantity)
-        if (cargo.weightKg) data.weightKg = Number(cargo.weightKg)
-      }
     }
     const form = new FormData()
     form.append('data', JSON.stringify(data))
@@ -107,11 +212,12 @@ export default function NewProcess() {
       <input type="file" accept="application/pdf,image/png,image/jpeg" multiple={multiple} onChange={setFile(field)} />
     </Field>
   )
+  const unitOptions = meta.units.map((u) => [u, u])
 
   return (
     <>
       <Link to="/processos" className="crumb"><Icon name="back" /> Processos</Link>
-      <PageHeader title="Novo processo" subtitle="Cadastre o cliente, a carga e anexe a documentação exigida." />
+      <PageHeader title="Novo processo" subtitle="Cadastre o cliente, o transporte e a carga, e anexe a documentação exigida." />
       <form onSubmit={submit} className="stack">
         <section className="card stack">
           <h3>Terminal</h3>
@@ -169,6 +275,66 @@ export default function NewProcess() {
         </section>
 
         <section className="card stack">
+          <h3>Transporte</h3>
+          <div className="row">
+            <Field label="N.º do B/L">
+              <input value={transport.blNumber} onChange={setT('blNumber')} required />
+            </Field>
+            <Field label="N.º do DU">
+              <input value={transport.duNumber} onChange={setT('duNumber')} required />
+            </Field>
+          </div>
+          <div className="row">
+            <Field label="Navio">
+              <input value={transport.vesselName} onChange={setT('vesselName')} required />
+            </Field>
+            <Field label="N.º da viagem">
+              <input value={transport.voyageNumber} onChange={setT('voyageNumber')} required />
+            </Field>
+          </div>
+          <div className="row">
+            <Field label="Tipo de descarga">
+              <select value={transport.dischargeType} onChange={setT('dischargeType')}>
+                {meta.dischargeTypes.map((d) => (
+                  <option key={d.value} value={d.value}>
+                    {d.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Regime (opcional)">
+              <select value={transport.regime} onChange={setT('regime')}>
+                <option value="">—</option>
+                {meta.regimes.map((r) => (
+                  <option key={r.value} value={r.value}>
+                    {r.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </div>
+          <div className="row">
+            <Field label="Peso bruto total (kg)">
+              <input type="number" min="0" step="any" value={transport.weightKg} onChange={setT('weightKg')} required />
+            </Field>
+            <Field label="N.º de volumes (opcional)">
+              <input type="number" min="1" step="1" value={transport.packagesCount} onChange={setT('packagesCount')} />
+            </Field>
+            <Field label="N.º do manifesto (opcional)">
+              <input value={transport.manifestNumber} onChange={setT('manifestNumber')} />
+            </Field>
+          </div>
+          <div className="row">
+            <Field label="País de origem (opcional)">
+              <input value={transport.originCountry} onChange={setT('originCountry')} />
+            </Field>
+            <Field label="País de destino (opcional)">
+              <input value={transport.destinationCountry} onChange={setT('destinationCountry')} />
+            </Field>
+          </div>
+        </section>
+
+        <section className="card stack">
           <h3>Carga</h3>
           <div className="row">
             <Field label="Prioridade">
@@ -180,14 +346,8 @@ export default function NewProcess() {
                 ))}
               </select>
             </Field>
-            <Field label="Tipo de volume">
-              <select
-                value={volumeType}
-                onChange={(e) => {
-                  setVolumeType(e.target.value)
-                  setCargoCategory('')
-                }}
-              >
+            <Field label="Tipo principal de volume">
+              <select value={volumeType} onChange={(e) => chooseVolume(e.target.value)}>
                 {meta.volumeTypes.map((v) => (
                   <option key={v.value} value={v.value}>
                     {v.label}
@@ -195,31 +355,9 @@ export default function NewProcess() {
                 ))}
               </select>
             </Field>
-          </div>
-
-          {isContainer ? (
-            <>
-              <div className="row">
-                <Field label="Matrícula do contentor">
-                  <input value={container.plate} onChange={setCont('plate')} required />
-                </Field>
-                <Field label="Tipo de contentor">
-                  <input value={container.type} onChange={setCont('type')} required />
-                </Field>
-              </div>
-              <div className="row">
-                <Field label="Volume (m³)">
-                  <input type="number" min="0" step="any" value={container.volume} onChange={setCont('volume')} required />
-                </Field>
-                <Field label="Peso (kg)">
-                  <input type="number" min="0" step="any" value={container.weightKg} onChange={setCont('weightKg')} required />
-                </Field>
-              </div>
-            </>
-          ) : (
-            <>
+            {!isContainer && (
               <Field label="Tipo de carga / faturação">
-                <select value={cargoCategory} onChange={(e) => setCargoCategory(e.target.value)} required>
+                <select value={cargoCategory} onChange={(e) => chooseCategory(e.target.value)} required>
                   <option value="" disabled>
                     Escolher…
                   </option>
@@ -230,32 +368,69 @@ export default function NewProcess() {
                   ))}
                 </select>
               </Field>
-              {isVehicle ? (
-                <div className="row">
-                  <Field label="Marca">
-                    <input value={cargo.vehicleBrand} onChange={setCargoField('vehicleBrand')} required />
-                  </Field>
-                  <Field label="Modelo">
-                    <input value={cargo.vehicleModel} onChange={setCargoField('vehicleModel')} required />
-                  </Field>
-                </div>
-              ) : (
-                <>
-                  <Field label="Descrição da mercadoria">
-                    <input value={cargo.description} onChange={setCargoField('description')} required />
-                  </Field>
-                  <div className="row">
-                    <Field label="Quantidade">
-                      <input type="number" min="0" step="any" value={cargo.quantity} onChange={setCargoField('quantity')} required />
-                    </Field>
-                    <Field label="Peso (kg)">
-                      <input type="number" min="0" step="any" value={cargo.weightKg} onChange={setCargoField('weightKg')} required />
-                    </Field>
-                  </div>
-                </>
-              )}
-            </>
+            )}
+          </div>
+          <Field label="Descrição geral (opcional)">
+            <input value={description} onChange={(e) => setDescription(e.target.value)} maxLength={1000} />
+          </Field>
+          <p className="muted small">
+            Pode misturar tipos: por exemplo, um carro com carga geral dentro. Indique em cada mercadoria onde é transportada.
+          </p>
+
+          <ItemList
+            title="Veículos"
+            items={vehicles}
+            setItems={setVehicles}
+            make={NEW_VEHICLE}
+            addLabel="Veículo"
+            empty="Sem veículos."
+            columns={[
+              { key: 'chassis', label: 'N.º do chassi', required: true },
+              { key: 'brand', label: 'Marca', required: true },
+              { key: 'model', label: 'Modelo', required: true },
+              { key: 'fuel', label: 'Combustível' },
+              { key: 'tariffCode', label: 'Posição pautal' },
+            ]}
+          />
+          <ItemList
+            title="Contentores"
+            items={containers}
+            setItems={setContainers}
+            make={NEW_CONTAINER}
+            addLabel="Contentor"
+            empty="Sem contentores."
+            columns={[
+              { key: 'number', label: 'Matrícula', required: true },
+              { key: 'size', label: 'Pés', options: meta.containerSizes.map((s) => [s, `${s}'`]) },
+              { key: 'type', label: 'Tipo' },
+              { key: 'loadStatus', label: 'Estado', options: [['', '—'], ['CHEIO', 'Cheio'], ['VAZIO', 'Vazio']] },
+              { key: 'seal', label: 'Selo' },
+              { key: 'packages', label: 'Volumes', type: 'number' },
+              { key: 'weightKg', label: 'Peso (kg)', type: 'number' },
+            ]}
+          />
+          {containers.length > 0 && (
+            <p className="muted small">
+              Contentores de 20&apos;: {containers.filter((c) => c.size === '20').length} · 40&apos;:{' '}
+              {containers.filter((c) => c.size === '40').length} · 45&apos;: {containers.filter((c) => c.size === '45').length}
+            </p>
           )}
+          <ItemList
+            title="Mercadorias"
+            items={goods}
+            setItems={setGoods}
+            make={NEW_GOOD}
+            addLabel="Mercadoria"
+            empty="Sem mercadorias."
+            columns={[
+              { key: 'description', label: 'Descrição', required: true },
+              { key: 'unit', label: 'Unidade', options: unitOptions },
+              { key: 'quantity', label: 'Quantidade', type: 'number', required: true },
+              { key: 'weightKg', label: 'Peso (kg)', type: 'number' },
+              { key: 'tariffCode', label: 'Código pautal' },
+              { key: 'carrier', label: 'Transportada em', options: carriers },
+            ]}
+          />
 
           <label className="check">
             <input type="checkbox" checked={urgency.requested} onChange={(e) => setUrgency({ ...urgency, requested: e.target.checked })} />

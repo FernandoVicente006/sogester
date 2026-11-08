@@ -6,7 +6,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
-import { CARGO_PRIORITIES, UPLOADABLE_KINDS, VOLUME_TYPES, cargoCatalog } from '../cargo.js';
+import { CARGO_PRIORITIES, CONTAINER_SIZES, DISCHARGE_TYPES, REGIMES, UNITS, UPLOADABLE_KINDS, VOLUME_TYPES, cargoCatalog } from '../cargo.js';
 import { badRequest, forbidden } from '../errors.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
@@ -105,18 +105,51 @@ const schemas = {
     volumeType: z.enum(Object.keys(VOLUME_TYPES)),
     cargoCategory: text(100).optional(),
     description: z.string().trim().min(1).max(1000).optional(),
-    quantity: z.number().positive().max(1e9).optional(),
-    weightKg: z.number().positive().max(1e9).optional(),
-    vehicleBrand: text(80).optional(),
-    vehicleModel: text(80).optional(),
-    container: z
-      .object({
-        plate: text(30),
-        type: text(60),
-        volume: z.number().positive().max(1e6),
-        weightKg: z.number().positive().max(1e9),
-      })
-      .optional(),
+    // transporte (como na nota de desalfandegamento)
+    blNumber: text(60),
+    duNumber: text(60),
+    vesselName: text(120),
+    voyageNumber: text(40),
+    dischargeType: z.enum(Object.keys(DISCHARGE_TYPES)),
+    regime: z.enum(Object.keys(REGIMES)).optional(),
+    manifestNumber: text(60).optional(),
+    weightKg: z.number().positive().max(1e9),
+    packagesCount: z.number().int().positive().max(1e7).optional(),
+    originCountry: text(80).optional(),
+    destinationCountry: text(80).optional(),
+    // listas: um processo pode misturar veículos, contentores e mercadorias
+    vehicles: z
+      .array(z.object({ chassis: text(40), brand: text(80), model: text(80), tariffCode: text(20).optional(), fuel: text(40).optional() }))
+      .max(200)
+      .default([]),
+    containers: z
+      .array(
+        z.object({
+          number: z.string().trim().toUpperCase().min(4).max(20),
+          size: z.enum(CONTAINER_SIZES),
+          type: text(40).optional(),
+          loadStatus: z.enum(['CHEIO', 'VAZIO']).optional(),
+          seal: text(40).optional(),
+          packages: z.number().int().positive().max(1e7).optional(),
+          weightKg: z.number().positive().max(1e9).optional(),
+        }),
+      )
+      .max(200)
+      .default([]),
+    goods: z
+      .array(
+        z.object({
+          description: text(255),
+          tariffCode: text(20).optional(),
+          unit: z.enum(UNITS),
+          quantity: z.number().positive().max(1e9),
+          weightKg: z.number().positive().max(1e9).optional(),
+          vehicle: z.number().int().min(0).optional(), // índice na lista de veículos que a transporta
+          container: z.number().int().min(0).optional(), // ou na de contentores
+        }),
+      )
+      .max(500)
+      .default([]),
     urgencyRequested: z.boolean().optional(),
     urgencyReason: z.string().trim().max(500).optional(),
   }),

@@ -53,8 +53,13 @@ const cargo = (extra = {}) => ({
   volumeType: 'CARGA_GERAL',
   cargoCategory: 'Mercadoria fracionada',
   description: 'Caixas de roupa',
-  quantity: 20,
+  blNumber: 'BL-88626',
+  duNumber: '2026R6028',
+  vesselName: 'Tchiowa',
+  voyageNumber: '12',
+  dischargeType: 'INDIRECTA',
   weightKg: 800,
+  goods: [{ description: 'Caixas de roupa', unit: 'Caixa', quantity: 20, weightKg: 800 }],
   ...extra,
 });
 
@@ -128,30 +133,74 @@ test('submissão, fila, estados e documentos de processos', async () => {
   assert.equal(noId.status, 400);
   const badCat = await api('POST', '/processes', { token: fwdA, form: form(cargo({ cargoCategory: 'Açúcar a granel' })) });
   assert.equal(badCat.status, 400);
-  const vehicleNoBrand = await api('POST', '/processes', {
+  const vehicleMissing = await api('POST', '/processes', {
     token: fwdA,
-    form: form(cargo({ volumeType: 'ALTO', cargoCategory: 'Veículos ligeiros em ro-ro', description: undefined, quantity: undefined, weightKg: undefined })),
+    form: form(cargo({ volumeType: 'AUTO', cargoCategory: 'Veículos ligeiros em ro-ro', goods: [] })),
   });
-  assert.equal(vehicleNoBrand.status, 400);
+  assert.equal(vehicleMissing.status, 400);
+  assert.ok(vehicleMissing.body.error.details.some((d) => d.field === 'vehicles'));
+  const noDu = await api('POST', '/processes', { token: fwdA, form: form(cargo({ duNumber: undefined })) });
+  assert.ok(noDu.body.error.details.some((d) => d.field === 'duNumber'), 'DU obrigatório');
+  const noChassis = await api('POST', '/processes', {
+    token: fwdA,
+    form: form(cargo({ volumeType: 'AUTO', cargoCategory: 'Veículos ligeiros em ro-ro', vehicles: [{ brand: 'Toyota', model: 'Hilux' }] })),
+  });
+  assert.ok(noChassis.body.error.details.some((d) => d.field === 'vehicles.0.chassis'), 'chassi obrigatório');
+  const badLink = await api('POST', '/processes', {
+    token: fwdA,
+    form: form(cargo({ goods: [{ description: 'Caixas', unit: 'Caixa', quantity: 1, container: 0 }] })),
+  });
+  assert.ok(badLink.body.error.details.some((d) => d.field === 'goods.0.container'), 'contentor tem de existir');
   const noReason = await api('POST', '/processes', { token: fwdA, form: form(cargo({ urgencyRequested: true })) });
   assert.equal(noReason.status, 400);
   const badJson = await api('POST', '/processes', { token: fwdA, form: new FormData() });
   assert.equal(badJson.status, 400);
   assert.equal(docCount(), before, 'ficheiros de submissões rejeitadas devem ser apagados');
 
-  // veículo (marca/modelo bastam), contentor e empresa estrangeira sem alvará
+  // carga mista: carro com carga geral dentro, e contentores; empresa estrangeira sem alvará
   const vehicle = await api('POST', '/processes', {
     token: fwdA,
-    form: form(cargo({ volumeType: 'ALTO', cargoCategory: 'Veículos ligeiros em ro-ro', description: undefined, quantity: undefined, weightKg: undefined, vehicleBrand: 'Toyota', vehicleModel: 'Hilux' })),
+    form: form(
+      cargo({
+        volumeType: 'AUTO',
+        cargoCategory: 'Veículos ligeiros em ro-ro',
+        vehicles: [{ chassis: 'JTEBU5JR0K5612345', brand: 'Toyota', model: 'Hilux', fuel: 'Gasóleo' }],
+        goods: [{ description: 'Caixas de roupa', unit: 'Caixa', quantity: 12, weightKg: 224, vehicle: 0 }],
+      }),
+    ),
   });
   assert.equal(vehicle.status, 201, JSON.stringify(vehicle.body));
+  const mixed = vehicle.body.process;
+  assert.equal(mixed.volumeType, 'AUTO');
+  assert.equal(mixed.vehicles[0].chassis, 'JTEBU5JR0K5612345');
+  assert.deepEqual([mixed.goods[0].vehicleChassis, mixed.goods[0].quantity], ['JTEBU5JR0K5612345', 12], 'mercadoria dentro do carro');
+  assert.deepEqual([mixed.blNumber, mixed.duNumber, mixed.dischargeType], ['BL-88626', '2026R6028', 'INDIRECTA']);
+
   const container = await api('POST', '/processes', {
     token: fwdA,
     form: form(
-      cargo({ volumeType: 'CONTENTOR', cargoCategory: undefined, description: undefined, quantity: undefined, weightKg: undefined, container: { plate: 'MSKU1234567', type: '40HC', volume: 67, weightKg: 12000 } }),
+      cargo({
+        volumeType: 'CONTENTOR',
+        cargoCategory: undefined,
+        regime: '31',
+        containers: [
+          { number: 'msku1234567', size: '40', type: 'HC', loadStatus: 'CHEIO', seal: 'S1' },
+          { number: 'MSKU7654321', size: '20' },
+          { number: 'MSKU7654322', size: '20' },
+        ],
+        goods: [{ description: 'Arroz', unit: 'Saco', quantity: 500, container: 1 }],
+      }),
     ),
   });
   assert.equal(container.status, 201, JSON.stringify(container.body));
+  assert.deepEqual(container.body.process.containerTotals, { 20: 2, 40: 1, 45: 0 }, 'totais de 20 e 40 pés calculados');
+  assert.equal(container.body.process.containers[0].number, 'MSKU1234567');
+  assert.equal(container.body.process.goods[0].containerNumber, 'MSKU7654321');
+  const repeated = await api('POST', '/processes', {
+    token: fwdA,
+    form: form(cargo({ volumeType: 'CONTENTOR', cargoCategory: undefined, containers: [{ number: 'MSKU1', size: '20' }, { number: 'MSKU1', size: '40' }] })),
+  });
+  assert.equal(repeated.status, 400);
   const foreign = await api('POST', '/processes', {
     token: fwdA,
     form: form(cargo({ client: { type: 'EMPRESA', name: 'Foreign Ltd', documentNumber: 'PT500100200', isForeign: true } }), ['ep15']),

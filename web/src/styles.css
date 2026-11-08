@@ -223,6 +223,10 @@ a.kpi:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgb(15 23 42 /
 .document-actions { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-top: .6rem; }
 .document-actions .small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .document-actions .button { flex: none; }
+.items-head { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
+.items-head h4 { margin: 0; font-size: .95rem; }
+.items-table td { padding: .35rem .4rem; vertical-align: middle; }
+.items-table input, .items-table select { min-width: 7rem; width: 100%; }
 .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem; }
 .compare h3 { margin: 0 0 .5rem; font-size: .95rem; }
 .compare .viewer-pdf, .compare .viewer-img { height: 60vh; }

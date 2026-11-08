@@ -45,8 +45,13 @@ const cargo = (extra = {}) => ({
   volumeType: 'CARGA_GERAL',
   cargoCategory: 'Mercadoria fracionada',
   description: 'Caixas de roupa',
-  quantity: 20,
+  blNumber: 'BL-88626',
+  duNumber: '2026R6028',
+  vesselName: 'Tchiowa',
+  voyageNumber: '12',
+  dischargeType: 'INDIRECTA',
   weightKg: 800,
+  goods: [{ description: 'Caixas de roupa', unit: 'Caixa', quantity: 20, weightKg: 800 }],
   ...extra,
 });
 

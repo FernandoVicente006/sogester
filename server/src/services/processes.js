@@ -31,10 +31,10 @@ const SELECT = `
          f.name AS forwarderName, p.status, p.status_notes AS statusNotes,
          p.cargo_priority AS cargoPriority, p.priority_rank AS priorityRank,
          p.urgency_requested AS urgencyRequested, p.urgency_reason AS urgencyReason,
-         p.volume_type AS volumeType, p.cargo_category AS cargoCategory, p.description,
-         p.quantity, p.weight_kg AS weightKg, p.vehicle_brand AS vehicleBrand, p.vehicle_model AS vehicleModel,
-         p.container_plate AS containerPlate, p.container_type AS containerType,
-         p.container_volume AS containerVolume, p.container_weight_kg AS containerWeightKg,
+         p.volume_type AS volumeType, p.cargo_category AS cargoCategory, p.description, p.weight_kg AS weightKg,
+         p.bl_number AS blNumber, p.du_number AS duNumber, p.vessel_name AS vesselName, p.voyage_number AS voyageNumber,
+         p.discharge_type AS dischargeType, p.regime, p.manifest_number AS manifestNumber, p.packages_count AS packagesCount,
+         p.origin_country AS originCountry, p.destination_country AS destinationCountry,
          p.submitted_at AS submittedAt, p.updated_at AS updatedAt, p.archived_at AS archivedAt,
          c.id AS clientId, c.type AS clientType, c.name AS clientName, c.document_number AS clientDocument,
          c.is_foreign AS clientIsForeign,
@@ -56,10 +56,7 @@ function mapProcess(r) {
     urgencyRequested: !!p.urgencyRequested,
     hasCommitment: !!p.hasCommitment,
     paymentOverdue: !!p.paymentOverdue,
-    quantity: num(p.quantity),
     weightKg: num(p.weightKg),
-    containerVolume: num(p.containerVolume),
-    containerWeightKg: num(p.containerWeightKg),
     client: { id: clientId, type: clientType, name: clientName, documentNumber: clientDocument, isForeign: !!clientIsForeign },
   };
 }
@@ -98,21 +95,23 @@ function validateCargo(input) {
   const need = (field, ok, message) => !ok && errors.push({ field, message });
   const volume = VOLUME_TYPES[input.volumeType];
 
+  const { vehicles, containers, goods } = input;
+  // O tipo de volume é o tipo principal da carga; as listas detalham-na e podem misturar tipos.
   if (input.volumeType === 'CONTENTOR') {
-    const c = input.container;
-    need('container', !!c, 'Dados do contentor obrigatórios');
     if (input.cargoCategory) need('cargoCategory', false, 'Contentor não tem categoria');
+    need('containers', containers.length > 0, 'Indique pelo menos um contentor');
   } else {
     need('cargoCategory', volume.categories.includes(input.cargoCategory), 'Categoria inválida para este tipo de volume');
-    if (isVehicleCategory(input.cargoCategory)) {
-      need('vehicleBrand', !!input.vehicleBrand, 'Marca obrigatória para veículos');
-      need('vehicleModel', !!input.vehicleModel, 'Modelo obrigatório para veículos');
-    } else {
-      need('description', !!input.description, 'Descrição obrigatória');
-      need('quantity', input.quantity != null, 'Quantidade obrigatória');
-      need('weightKg', input.weightKg != null, 'Peso obrigatório');
-    }
+    if (isVehicleCategory(input.cargoCategory)) need('vehicles', vehicles.length > 0, 'Indique pelo menos um veículo');
+    else need('goods', goods.length > 0, 'Indique pelo menos uma mercadoria');
   }
+  goods.forEach((g, i) => {
+    need(`goods.${i}.vehicle`, g.vehicle === undefined || g.vehicle < vehicles.length, 'Veículo inexistente');
+    need(`goods.${i}.container`, g.container === undefined || g.container < containers.length, 'Contentor inexistente');
+    need(`goods.${i}`, g.vehicle === undefined || g.container === undefined, 'A mercadoria está num veículo ou num contentor, não nos dois');
+  });
+  const numbers = containers.map((c) => c.number);
+  need('containers', new Set(numbers).size === numbers.length, 'Contentor repetido');
   if (input.client.isForeign) need('client.isForeign', input.client.type === 'EMPRESA', 'Só empresas podem ser estrangeiras');
   need('urgencyReason', !input.urgencyRequested || !!input.urgencyReason, 'Indique o motivo da urgência');
   return errors;
@@ -158,20 +157,21 @@ export async function createProcess(actor, input, files) {
       [actor.forwarderId, c.type, c.name, c.documentNumber, c.isForeign ? 1 : 0, c.phone ?? null, c.email ?? null, c.address ?? null],
     );
 
-    const ct = input.container;
     const [res] = await conn.query(
       `INSERT INTO processes (entity_id, forwarder_id, client_id, created_by, cargo_priority, priority_rank,
-         urgency_requested, urgency_reason, volume_type, cargo_category, description, quantity, weight_kg,
-         vehicle_brand, vehicle_model, container_plate, container_type, container_volume, container_weight_kg)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         urgency_requested, urgency_reason, volume_type, cargo_category, description, weight_kg,
+         bl_number, du_number, vessel_name, voyage_number, discharge_type, regime, manifest_number, packages_count,
+         origin_country, destination_country)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         entity.id, actor.forwarderId, cl.insertId, actor.id, input.cargoPriority, CARGO_PRIORITIES[input.cargoPriority].rank,
         input.urgencyRequested ? 1 : 0, input.urgencyReason ?? null, input.volumeType, input.cargoCategory ?? null,
-        input.description ?? null, input.quantity ?? null, input.weightKg ?? null,
-        input.vehicleBrand ?? null, input.vehicleModel ?? null,
-        ct?.plate ?? null, ct?.type ?? null, ct?.volume ?? null, ct?.weightKg ?? null,
+        input.description ?? null, input.weightKg, input.blNumber, input.duNumber, input.vesselName, input.voyageNumber,
+        input.dischargeType, input.regime ?? null, input.manifestNumber ?? null, input.packagesCount ?? null,
+        input.originCountry ?? null, input.destinationCountry ?? null,
       ],
     );
+    await insertCargoItems(conn, res.insertId, input);
     const reference = `${entity.code.slice(0, 3)}-${new Date().getFullYear()}-${String(res.insertId).padStart(6, '0')}`;
     await conn.query('UPDATE processes SET reference = ? WHERE id = ?', [reference, res.insertId]);
 
@@ -186,6 +186,37 @@ export async function createProcess(actor, input, files) {
   const created = await getProcess(actor, id);
   await notifyProcessEvent('PROCESS_SUBMITTED', created, { actor });
   return created;
+}
+
+/** Grava as listas; as mercadorias referem o veículo ou contentor que as transporta pela posição na lista. */
+async function insertCargoItems(conn, processId, { vehicles, containers, goods }) {
+  const vehicleIds = [];
+  for (const [i, v] of vehicles.entries()) {
+    const [r] = await conn.query(
+      'INSERT INTO process_vehicles (process_id, position, chassis, brand, model, tariff_code, fuel) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [processId, i + 1, v.chassis, v.brand, v.model, v.tariffCode ?? null, v.fuel ?? null],
+    );
+    vehicleIds.push(r.insertId);
+  }
+  const containerIds = [];
+  for (const [i, c] of containers.entries()) {
+    const [r] = await conn.query(
+      `INSERT INTO process_containers (process_id, position, number, size, type, load_status, seal, packages, weight_kg)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [processId, i + 1, c.number, c.size, c.type ?? null, c.loadStatus ?? null, c.seal ?? null, c.packages ?? null, c.weightKg ?? null],
+    );
+    containerIds.push(r.insertId);
+  }
+  for (const [i, g] of goods.entries()) {
+    await conn.query(
+      `INSERT INTO process_goods (process_id, position, description, tariff_code, unit, quantity, weight_kg, vehicle_id, container_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        processId, i + 1, g.description, g.tariffCode ?? null, g.unit, g.quantity, g.weightKg ?? null,
+        g.vehicle === undefined ? null : vehicleIds[g.vehicle], g.container === undefined ? null : containerIds[g.container],
+      ],
+    );
+  }
 }
 
 export async function insertDocument(conn, processId, kind, file, userId) {
@@ -261,7 +292,7 @@ export async function processStats(actor) {
 
 export async function getProcess(actor, id) {
   const process = mapProcess(await loadAccessible(actor, id));
-  const [documents, history, commitment, authorization, invoice, extensions] = await Promise.all([
+  const [documents, history, commitment, authorization, invoice, extensions, vehicles, containers, goods] = await Promise.all([
     query(
       `SELECT id, kind, original_name AS originalName, mime_type AS mimeType, size_bytes AS sizeBytes,
               created_at AS createdAt FROM process_documents WHERE process_id = ? ORDER BY id`,
@@ -298,12 +329,35 @@ export async function getProcess(actor, id) {
         WHERE c.process_id = ? ORDER BY e.id`,
       [id],
     ),
+    query(
+      `SELECT id, chassis, brand, model, tariff_code AS tariffCode, fuel FROM process_vehicles WHERE process_id = ? ORDER BY position`,
+      [id],
+    ),
+    query(
+      `SELECT id, number, size, type, load_status AS loadStatus, seal, packages, weight_kg AS weightKg
+         FROM process_containers WHERE process_id = ? ORDER BY position`,
+      [id],
+    ),
+    query(
+      `SELECT g.description, g.tariff_code AS tariffCode, g.unit, g.quantity, g.weight_kg AS weightKg,
+              v.chassis AS vehicleChassis, CONCAT(v.brand, ' ', v.model) AS vehicleName, c.number AS containerNumber
+         FROM process_goods g
+         LEFT JOIN process_vehicles v ON v.id = g.vehicle_id
+         LEFT JOIN process_containers c ON c.id = g.container_id
+        WHERE g.process_id = ? ORDER BY g.position`,
+      [id],
+    ),
   ]);
+  const containerList = containers.map((c) => ({ ...c, weightKg: num(c.weightKg) }));
   return {
     ...process,
     unreadMessages: (await unreadByProcess(actor, [id])).get(id) ?? 0,
     documents,
     history,
+    vehicles,
+    containers: containerList,
+    containerTotals: Object.fromEntries(['20', '40', '45'].map((s) => [s, containerList.filter((c) => c.size === s).length])),
+    goods: goods.map((g) => ({ ...g, quantity: num(g.quantity), weightKg: num(g.weightKg) })),
     commitment: commitment ? { ...commitment, extensions, extensionsLeft: Math.max(0, MAX_EXTENSIONS - commitment.extensionCount) } : null,
     authorization: authorization ?? null,
     invoice: invoice ? { ...invoice, amount: num(invoice.amount) } : null,

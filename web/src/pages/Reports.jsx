@@ -5,7 +5,7 @@ import { useAuth } from '../auth.jsx'
 import { Empty, ErrorBox, Field, Icon, PRIORITY_LABELS, PROCESS_STATUS_LABELS, PageHeader, ProcessBadge, formatDate } from '../components/ui.jsx'
 
 const BILLING_ROLES = ['SUPER_ADMIN', 'ADMIN_ENTIDADE', 'FINANCAS', 'CHEFE_COMERCIAL']
-const VOLUME_LABELS = { ALTO: 'Alto', CARGA_GRANEL: 'Carga granel', CARGA_GERAL: 'Carga geral', CONTENTOR: 'Contentor' }
+const VOLUME_LABELS = { AUTO: 'Auto', CARGA_GRANEL: 'Carga granel', CARGA_GERAL: 'Carga geral', CONTENTOR: 'Contentor' }
 
 const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 const daysAgo = (n) => ymd(new Date(Date.now() - n * 86400000))

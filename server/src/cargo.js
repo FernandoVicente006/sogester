@@ -8,7 +8,7 @@ export const CARGO_PRIORITIES = {
   NAO_PRIORITARIO: { rank: 4, label: 'Não prioritário' },
 };
 
-const ALTO = [
+const AUTO = [
   'Atrelados acompanhando o veículo',
   'Atrelados isolados',
   'Carga ro-ro',
@@ -50,7 +50,7 @@ const GERAL = [
 ];
 
 export const VOLUME_TYPES = {
-  ALTO: { label: 'Alto', categories: ALTO },
+  AUTO: { label: 'Auto', categories: AUTO },
   CARGA_GRANEL: { label: 'Carga granel', categories: GRANEL },
   CARGA_GERAL: { label: 'Carga geral', categories: GERAL },
   CONTENTOR: { label: 'Contentor', categories: [] }, // usa campos próprios de contentor
@@ -75,8 +75,36 @@ export const DOCUMENT_KINDS = {
 /** Tipos que o transitário pode anexar livremente; os de faturação só entram pelos seus próprios passos. */
 export const UPLOADABLE_KINDS = ['BILHETE', 'ALVARA', 'GUIA_CABOTAGEM', 'BL', 'EP17', 'EP15', 'OUTRO'];
 
+/** Regimes aduaneiros (como na nota de desalfandegamento da JUP). */
+export const REGIMES = {
+  31: 'Cabotagem Importação',
+  32: 'Cabotagem Exportação',
+  33: 'Fornecimento Embarcações',
+  34: 'Outros',
+  35: 'Importação Adicional',
+  36: 'Exportação Adicional',
+  EX1: 'Exportação Definitiva',
+  EX2: 'Exportação Temporária',
+  EX3: 'Reexportação',
+  EXS1: 'Exportação Simplificada',
+  IM4: 'Importação Definitiva',
+  IM5: 'Importação Temporária',
+  IM6: 'Reimportação',
+  IM7: 'Armazenagem Aduaneira',
+  IM8: 'Trânsito Aduaneiro',
+  IMS4: 'Importação Simplificada',
+};
+
+export const DISCHARGE_TYPES = { DIRECTA: 'Directa', INDIRECTA: 'Indirecta' };
+export const CONTAINER_SIZES = ['20', '40', '45'];
+export const UNITS = ['Unidade', 'Quilograma', 'Tonelada', 'Caixa', 'Saco', 'Palete', 'Fardo', 'Bidon', 'Litro', 'Metro cúbico'];
+
 export function cargoCatalog() {
   return {
+    regimes: Object.entries(REGIMES).map(([value, label]) => ({ value, label: `${value} | ${label}` })),
+    dischargeTypes: Object.entries(DISCHARGE_TYPES).map(([value, label]) => ({ value, label })),
+    containerSizes: CONTAINER_SIZES,
+    units: UNITS,
     priorities: Object.entries(CARGO_PRIORITIES).map(([value, { label, rank }]) => ({ value, label, rank })),
     volumeTypes: Object.entries(VOLUME_TYPES).map(([value, { label, categories }]) => ({ value, label, categories })),
     documentKinds: Object.entries(DOCUMENT_KINDS).map(([value, label]) => ({ value, label })),
