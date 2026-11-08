@@ -104,16 +104,36 @@ test('fluxo completo nos três terminais, isolamento e relatório do administrad
   for (const code of ['SOYO', 'LUANDA']) {
     assert.equal((await api('POST', '/forwarders/link', { token: T[code].admin, body: { nif: '5417999001' } })).status, 201);
   }
-  const fwd = await login('op@tres.ao');
-  // ainda pendente em Soyo: não pode submeter
-  const pendingTry = await api('POST', '/processes', { token: fwd, form: form(cargo(T.SOYO.id), ['ep17', 'reciboEp', 'documentos']) });
-  assert.equal(pendingTry.status, 403, JSON.stringify(pendingTry.body));
-  for (const code of ['CABINDA', 'SOYO', 'LUANDA']) {
+  // aprovado só em Cabinda: entra direto em Cabinda, sem escolher; Soyo pendente não abre
+  assert.equal((await api('PUT', `/forwarders/${fwdId}/entities/${T.CABINDA.id}`, { token: T.CABINDA.admin, body: { status: 'APROVADO' } })).status, 200);
+  const first = (await api('POST', '/auth/login', { body: { email: 'op@tres.ao', password: 'Senha1234' } })).body;
+  assert.equal(first.user.terminal.code, 'CABINDA');
+  assert.equal((await api('POST', '/auth/terminal', { token: first.token, body: { entityId: T.SOYO.id } })).status, 403, 'Soyo ainda pendente');
+
+  for (const code of ['SOYO', 'LUANDA']) {
     const r = await api('PUT', `/forwarders/${fwdId}/entities/${T[code].id}`, { token: T[code].admin, body: { status: 'APROVADO' } });
     assert.equal(r.status, 200, JSON.stringify(r.body));
   }
   // um terminal não aprova o vínculo de outro
   assert.equal((await api('PUT', `/forwarders/${fwdId}/entities/${T.SOYO.id}`, { token: T.CABINDA.admin, body: { status: 'SUSPENSO' } })).status, 403);
+
+  // --- com vários terminais aprovados, o login não entra em nenhum: escolhe-se o terminal (como JUP / Portal)
+  const multi = (await api('POST', '/auth/login', { body: { email: 'op@tres.ao', password: 'Senha1234' } })).body;
+  assert.equal(multi.user.terminal, null);
+  assert.equal((await api('GET', '/processes', { token: multi.token })).body.error.code, 'TERMINAL_REQUIRED');
+  const choices = (await api('GET', '/auth/terminals', { token: multi.token })).body.terminals;
+  assert.deepEqual(choices.filter((c) => c.open).map((c) => c.code).sort(), ['CABINDA', 'LUANDA', 'SOYO']);
+  const fwdIn = {};
+  for (const code of Object.keys(T)) {
+    const r = await api('POST', '/auth/terminal', { token: multi.token, body: { entityId: T[code].id } });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.user.terminal.code, code);
+    fwdIn[code] = r.body.token;
+    assert.equal((await api('GET', '/auth/me', { token: r.body.token })).body.user.terminal.code, code);
+  }
+  // dentro de Cabinda não se submete para Soyo
+  const wrong = await api('POST', '/processes', { token: fwdIn.CABINDA, form: form(cargo(T.SOYO.id), ['ep17', 'reciboEp', 'documentos']) });
+  assert.equal(wrong.body.error.code, 'WRONG_TERMINAL');
 
   // --- um processo por terminal, do início ao fim
   const AMOUNTS = { CABINDA: 100000, SOYO: 250000, LUANDA: 75000.5 };
@@ -125,7 +145,7 @@ test('fluxo completo nos três terminais, isolamento e relatório do administrad
   const done = {};
   for (const code of ['CABINDA', 'SOYO', 'LUANDA']) {
     const t = T[code];
-    const r = await api('POST', '/processes', { token: fwd, form: form(cargo(t.id), ['ep17', 'reciboEp', 'documentos']) });
+    const r = await api('POST', '/processes', { token: fwdIn[code], form: form(cargo(t.id), ['ep17', 'reciboEp', 'documentos']) });
     assert.equal(r.status, 201, JSON.stringify(r.body));
     const p = r.body.process;
     assert.match(p.reference, new RegExp(`^${code.slice(0, 3)}-\\d{4}-\\d{6}$`));
@@ -140,7 +160,9 @@ test('fluxo completo nos três terminais, isolamento e relatório do administrad
     await step(t.loja, p.id, '/transition', { body: { status: 'EM_PROCESSAMENTO_INTERNO' } });
     const pf = await step(t.loja, p.id, '/proforma', { form: form({ number: `PF-${code}`, amount: AMOUNTS[code] }, ['proforma']) });
     assert.equal(pf.status, 'PAGAMENTO_PENDENTE');
-    await step(fwd, p.id, '/payment-proof', { form: form(null, ['proof']) });
+    // o processo só existe para o transitário dentro do seu terminal
+    for (const other of Object.keys(T).filter((c) => c !== code)) assert.equal((await api('GET', `/processes/${p.id}`, { token: fwdIn[other] })).status, 404);
+    await step(fwdIn[code], p.id, '/payment-proof', { form: form(null, ['proof']) });
     const other = code === 'CABINDA' ? 'SOYO' : 'CABINDA';
     await step(T[other].fin, p.id, '/confirm-payment', { body: {} }, 404);
     await step(t.fin, p.id, '/confirm-payment', { body: {} });
@@ -150,13 +172,15 @@ test('fluxo completo nos três terminais, isolamento e relatório do administrad
   }
 
   // um processo de Soyo fica em curso, para os números se distinguirem
-  const open = (await api('POST', '/processes', { token: fwd, form: form(cargo(T.SOYO.id), ['ep17', 'reciboEp', 'documentos']) })).body.process;
+  const open = (await api('POST', '/processes', { token: fwdIn.SOYO, form: form(cargo(T.SOYO.id), ['ep17', 'reciboEp', 'documentos']) })).body.process;
   await step(T.SOYO.loja, open.id, '/transition', { body: { status: 'EM_ANALISE' } });
 
   // --- listas: cada terminal só vê o seu; o transitário vê os seus em todos; o administrador geral vê tudo
   const archived = async (token) => (await api('GET', '/processes?archived=1', { token })).body.processes.map((p) => p.reference).sort();
   for (const code of Object.keys(T)) assert.deepEqual(await archived(T[code].loja), [done[code].reference]);
-  assert.equal((await archived(fwd)).length, 3);
+  for (const code of Object.keys(T)) assert.deepEqual(await archived(fwdIn[code]), [done[code].reference], 'transitário vê só o arquivo do terminal em que está');
+  const notes = (await api('GET', '/notifications', { token: fwdIn.LUANDA })).body.notifications;
+  assert.ok(notes.length > 0 && notes.every((n) => !n.processId || n.processId === done.LUANDA.id), 'avisos só do terminal em que está');
   assert.equal((await archived(master)).length, 3);
   assert.deepEqual((await api('GET', '/processes', { token: T.SOYO.loja })).body.processes.map((p) => p.id), [open.id]);
   assert.equal((await api('GET', '/processes', { token: T.CABINDA.loja })).body.processes.length, 0);
@@ -166,7 +190,7 @@ test('fluxo completo nos três terminais, isolamento e relatório do administrad
   assert.equal(cabProcesses.summary.total, 1);
   assert.equal((await api('GET', '/reports/processes?entityId=' + T.SOYO.id, { token: T.CABINDA.admin })).body.report.summary.total, 1, 'ignora o filtro de outro terminal');
   assert.equal((await api('GET', '/reports/terminals', { token: T.CABINDA.admin })).status, 403);
-  assert.equal((await api('GET', '/reports/terminals', { token: fwd })).status, 403);
+  assert.equal((await api('GET', '/reports/terminals', { token: fwdIn.CABINDA })).status, 403);
 
   const report = (await api('GET', '/reports/terminals', { token: master })).body.report;
   const row = (code) => report.rows.find((r) => r.code === code);

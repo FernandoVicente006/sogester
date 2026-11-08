@@ -7,6 +7,7 @@ import { CARGO_PRIORITIES, DOCUMENT_KINDS, OPERATIONS, UPLOADABLE_KINDS, VOLUME_
 import { ROLES, isForwarder, isSuperAdmin } from '../roles.js';
 import { audit } from './audit.js';
 import { isApprovedIn } from './forwarders.js';
+import { terminalRequired } from './auth.js';
 import { notifyProcessEvent } from './notifications.js';
 
 /** Prorrogações máximas do prazo de pagamento por compromisso. */
@@ -81,7 +82,11 @@ function mapProcess(r) {
 export function scopeClause(actor) {
   // A Portaria só verifica autorizações pelo código; não consulta processos.
   if (actor.role === ROLES.PORTARIA) throw forbidden('A Portaria só verifica autorizações');
-  if (isForwarder(actor)) return { sql: 'p.forwarder_id = ?', params: [actor.forwarderId] };
+  // O transitário trabalha dentro do terminal em que entrou.
+  if (isForwarder(actor)) {
+    if (!actor.terminalId) throw terminalRequired();
+    return { sql: 'p.forwarder_id = ? AND p.entity_id = ?', params: [actor.forwarderId, actor.terminalId] };
+  }
   if (isSuperAdmin(actor)) return { sql: '1 = 1', params: [] };
   return { sql: 'p.entity_id = ?', params: [actor.entityId] };
 }
@@ -152,6 +157,9 @@ function validateDocuments(operation, kinds) {
 /** Submissão de um processo pelo transitário; `files` = [{ kind, file }] já gravados em disco. */
 export async function createProcess(actor, input, files) {
   if (!isForwarder(actor)) throw forbidden('Apenas transitários submetem processos');
+  if (!actor.terminalId) throw terminalRequired();
+  if (input.entityId && input.entityId !== actor.terminalId) throw badRequest('O processo é submetido no terminal em que entrou', 'WRONG_TERMINAL');
+  input = { ...input, entityId: actor.terminalId };
 
   const errors = [...validateCargo(input), ...validateDocuments(input.operation, new Set(files.map((f) => f.kind)))];
   if (errors.length) throw badRequest('Dados inválidos', 'VALIDATION_ERROR', errors);

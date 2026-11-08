@@ -290,12 +290,16 @@ export async function processOutbox({ limit = 25 } = {}) {
 
 // ---- consulta e leitura (API) --------------------------------------------------------------
 export async function listNotifications(user, { unreadOnly = false, limit = 30 } = {}) {
+  // O transitário só vê os avisos do terminal em que entrou.
+  const terminal = user.forwarderId
+    ? { sql: ' AND (process_id IS NULL OR process_id IN (SELECT id FROM processes WHERE entity_id = ?))', params: [user.terminalId ?? 0] }
+    : { sql: '', params: [] };
   const rows = await query(
     `SELECT id, type, title, body, process_id AS processId, read_at AS readAt, created_at AS createdAt
-       FROM notifications WHERE user_id = ? ${unreadOnly ? 'AND read_at IS NULL' : ''} ORDER BY id DESC LIMIT ?`,
-    [user.id, limit],
+       FROM notifications WHERE user_id = ? ${terminal.sql} ${unreadOnly ? 'AND read_at IS NULL' : ''} ORDER BY id DESC LIMIT ?`,
+    [user.id, ...terminal.params, limit],
   );
-  const { n } = await queryOne('SELECT COUNT(*) AS n FROM notifications WHERE user_id = ? AND read_at IS NULL', [user.id]);
+  const { n } = await queryOne(`SELECT COUNT(*) AS n FROM notifications WHERE user_id = ? ${terminal.sql} AND read_at IS NULL`, [user.id, ...terminal.params]);
   return { notifications: rows, unread: Number(n), emailEnabled: mailEnabled() };
 }
 

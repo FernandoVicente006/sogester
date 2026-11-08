@@ -214,7 +214,12 @@ test('submissão, fila, estados e documentos de processos', async () => {
   assert.equal(wrongEp.status, 400, 'desembarque não aceita o EP15');
 
   // --- permissões de submissão
-  assert.equal((await api('POST', '/processes', { token: fwdPending, form: form(cargo()) })).status, 403);
+  // sem vínculo aprovado não há terminal aberto: não entra em nenhum, mas vê o pedido pendente
+  const pendingTry = await api('POST', '/processes', { token: fwdPending, form: form(cargo()) });
+  assert.equal(pendingTry.body.error.code, 'TERMINAL_REQUIRED');
+  const pendingTerminals = (await api('GET', '/auth/terminals', { token: fwdPending })).body.terminals;
+  assert.deepEqual(pendingTerminals.map((t) => [t.code, t.status, t.open]), [['CABINDA', 'PENDENTE', false]]);
+  assert.equal((await api('POST', '/auth/terminal', { token: fwdPending, body: { entityId: 1 } })).status, 403);
   assert.equal((await api('POST', '/processes', { token: loja, form: form(cargo()) })).status, 403);
   assert.equal((await api('POST', '/processes', { form: form(cargo()) })).status, 401);
 

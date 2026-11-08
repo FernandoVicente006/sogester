@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs';
-import { pool, queryOne } from '../db/pool.js';
-import { badRequest, unauthorized } from '../errors.js';
-import { signToken } from '../middleware/auth.js';
+import { pool, query, queryOne } from '../db/pool.js';
+import { HttpError, badRequest, forbidden, unauthorized } from '../errors.js';
+import { openTerminalsSql, resolveTerminal, signToken } from '../middleware/auth.js';
 import { audit } from './audit.js';
 
 const publicUser = (u) => ({
@@ -13,7 +13,33 @@ const publicUser = (u) => ({
   forwarderId: u.forwarderId ?? u.forwarder_id ?? null,
   emailNotifications: !!(u.emailNotifications ?? u.email_notifications ?? 1),
   canManageTerminals: !!(u.canManageTerminals ?? u.can_manage_terminals ?? 0),
+  terminal: u.terminal ?? null,
 });
+
+/** O transitário precisa de estar dentro de um terminal para ver e tratar processos. */
+export const terminalRequired = () =>
+  new HttpError(409, 'TERMINAL_REQUIRED', 'Escolha o terminal em que quer trabalhar');
+
+/** Todos os terminais do transitário, com o estado do vínculo (os não aprovados aparecem mas não abrem). */
+export async function forwarderTerminals(user) {
+  if (!user.forwarderId) throw forbidden('Só para transitários');
+  const rows = await query(
+    `SELECT e.id, e.code, e.name, e.location, e.active, fe.status
+       FROM forwarder_entities fe JOIN entities e ON e.id = fe.entity_id
+      WHERE fe.forwarder_id = ? ORDER BY e.name`,
+    [user.forwarderId],
+  );
+  return rows.map((r) => ({ ...r, active: !!r.active, open: !!r.active && r.status === 'APROVADO' }));
+}
+
+/** Entra num terminal: devolve um token novo que limita a sessão a esse terminal. */
+export async function selectTerminal(user, entityId) {
+  if (!user.forwarderId) throw forbidden('Só para transitários');
+  const [terminal] = await query(`${openTerminalsSql} AND e.id = ?`, [user.forwarderId, entityId]);
+  if (!terminal) throw forbidden('Não está aprovado neste terminal ou o terminal está inativo');
+  await audit(user, 'TERMINAL_SELECTED', 'entity', entityId, { entityId });
+  return { token: signToken(user, entityId), user: publicUser({ ...user, terminal, terminalId: terminal.id }) };
+}
 
 export async function login(email, password) {
   const row = await queryOne('SELECT * FROM users WHERE email = ?', [email]);
@@ -23,7 +49,9 @@ export async function login(email, password) {
   if (!row || !ok || !row.active) throw unauthorized('E-mail ou palavra-passe incorretos');
 
   await pool.query('UPDATE users SET last_login_at = NOW() WHERE id = ?', [row.id]);
-  return { token: signToken(row), user: publicUser(row) };
+  // Transitário com um só terminal aberto entra direto; com vários, escolhe a seguir (como JUP / Portal).
+  const terminal = row.forwarder_id ? await resolveTerminal(row.forwarder_id) : null;
+  return { token: signToken(row, terminal?.id), user: publicUser({ ...row, terminal }) };
 }
 
 export async function changePassword(user, currentPassword, newPassword) {

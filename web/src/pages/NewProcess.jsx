@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api, errorText } from '../api.js'
+import { useAuth } from '../auth.jsx'
 import { ErrorBox, Field, Icon, PageHeader } from '../components/ui.jsx'
 
 const EMPTY_CLIENT = { type: 'SINGULAR', name: '', documentNumber: '', isForeign: false, phone: '', email: '', address: '' }
@@ -93,13 +94,12 @@ function ItemList({ title, items, setItems, make, columns, addLabel, empty }) {
 
 export default function NewProcess() {
   const navigate = useNavigate()
+  const { user } = useAuth()
   const [meta, setMeta] = useState(null)
-  const [terminals, setTerminals] = useState([])
   const [clients, setClients] = useState([])
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
-  const [entityId, setEntityId] = useState('')
   const [operation, setOperation] = useState('')
   const [client, setClient] = useState(EMPTY_CLIENT)
   const [cargoPriority, setCargoPriority] = useState('NAO_PRIORITARIO')
@@ -114,12 +114,9 @@ export default function NewProcess() {
   const [files, setFiles] = useState({})
 
   useEffect(() => {
-    Promise.all([api('GET', '/meta/cargo'), api('GET', '/forwarders'), api('GET', '/clients')])
-      .then(([m, f, c]) => {
+    Promise.all([api('GET', '/meta/cargo'), api('GET', '/clients')])
+      .then(([m, c]) => {
         setMeta(m)
-        const approved = (f.forwarders[0]?.entities ?? []).filter((e) => e.status === 'APROVADO')
-        setTerminals(approved)
-        setEntityId(approved[0]?.entityId ? String(approved[0].entityId) : '')
         setClients(c.clients)
       })
       .catch((err) => setError(errorText(err)))
@@ -171,7 +168,6 @@ export default function NewProcess() {
     setError('')
     setBusy(true)
     const data = {
-      entityId: Number(entityId),
       operation,
       client: clean({ ...client, isForeign: client.type === 'EMPRESA' ? client.isForeign : undefined }),
       cargoPriority,
@@ -207,14 +203,6 @@ export default function NewProcess() {
   }
 
   if (!meta) return error ? <ErrorBox message={error} /> : <p className="muted">A carregar…</p>
-  if (!terminals.length) {
-    return (
-      <>
-        <Link to="/processos" className="crumb"><Icon name="back" /> Processos</Link>
-        <p className="error">Ainda não está aprovado em nenhum terminal. Contacte a Sogester.</p>
-      </>
-    )
-  }
 
   const docInput = (field, label, { multiple = false, required = false, hint } = {}) => (
     <Field label={label}>
@@ -232,14 +220,11 @@ export default function NewProcess() {
         <section className="card stack">
           <h3>Terminal e operação</h3>
           <div className="row">
-          <Field label="Terminal de destino">
-            <select value={entityId} onChange={(e) => setEntityId(e.target.value)}>
-              {terminals.map((t) => (
-                <option key={t.entityId} value={t.entityId}>
-                  {t.entityName}
-                </option>
-              ))}
-            </select>
+          <Field label="Terminal">
+            <input value={user.terminal?.name ?? ''} readOnly aria-describedby="terminal-hint" />
+            <span id="terminal-hint" className="muted small">
+              O processo fica no terminal em que entrou. Para outro terminal, use «Trocar de terminal» no menu.
+            </span>
           </Field>
           <Field label="Operação">
             <div className="choice">

@@ -16,6 +16,7 @@ import Notifications from './pages/Notifications.jsx'
 import Reports from './pages/Reports.jsx'
 import EarlyRelease from './pages/EarlyRelease.jsx'
 import Gate from './pages/Gate.jsx'
+import ChooseTerminal from './pages/ChooseTerminal.jsx'
 
 /** Página inicial: a fila de processos (cada perfil já vê só o que lhe cabe). */
 function Home() {
@@ -27,6 +28,8 @@ function Protected({ roles, allow, children }) {
   const { user, loading } = useAuth()
   if (loading) return <p className="center muted">A carregar…</p>
   if (!user) return <Navigate to="/login" replace />
+  // o transitário trabalha sempre dentro de um terminal escolhido
+  if (user.role === 'TRANSITARIO' && !user.terminal) return <Navigate to="/terminal" replace />
   if (roles && !roles.includes(user.role)) return <Navigate to="/" replace />
   if (allow && !allow(user)) return <Navigate to="/" replace />
   return children
@@ -37,6 +40,7 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/setup" element={<Setup />} />
+      <Route path="/terminal" element={<ChooseTerminal />} />
       <Route path="/verificar/:code" element={<Verify />} />
       <Route
         element={

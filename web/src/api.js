@@ -31,6 +31,8 @@ export async function api(method, path, { body, headers, form } = {}) {
   if (!res.ok) {
     const err = data?.error ?? {}
     if (res.status === 401 && token) onUnauthorized()
+    // o transitário perdeu o terminal (vínculo suspenso ou terminal desativado): volta à escolha
+    if (err.code === 'TERMINAL_REQUIRED' && window.location.pathname !== '/terminal') window.location.assign('/terminal')
     throw new ApiError(res.status, err.code ?? 'ERROR', err.message ?? 'Erro inesperado', err.details)
   }
   return data

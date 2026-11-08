@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { NavLink, Outlet, useLocation } from 'react-router-dom'
+import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import { api } from '../api.js'
 import { ROLE_LABELS, useAuth } from '../auth.jsx'
 import NotificationBell from './NotificationBell.jsx'
@@ -29,7 +29,9 @@ export default function Layout() {
   const { user, logout } = useAuth()
   const unread = useUnread()
   const [open, setOpen] = useState(false)
-  const [terminal, setTerminal] = useState('')
+  const [staffTerminal, setStaffTerminal] = useState('')
+  const isForwarder = user.role === 'TRANSITARIO'
+  const terminal = isForwarder ? user.terminal?.name : staffTerminal
   const location = useLocation()
   const isAdmin = ['SUPER_ADMIN', 'ADMIN_ENTIDADE'].includes(user.role)
 
@@ -38,7 +40,7 @@ export default function Layout() {
   useEffect(() => {
     if (!user.entityId) return
     api('GET', '/entities')
-      .then((r) => setTerminal(r.entities.find((e) => e.id === user.entityId)?.name ?? ''))
+      .then((r) => setStaffTerminal(r.entities.find((e) => e.id === user.entityId)?.name ?? ''))
       .catch(() => {})
   }, [user.entityId])
 
@@ -50,6 +52,11 @@ export default function Layout() {
           <div className="terminal-chip">
             <span>Terminal</span>
             {terminal}
+            {isForwarder && (
+              <div>
+                <Link to="/terminal">Trocar de terminal</Link>
+              </div>
+            )}
           </div>
         )}
         <nav aria-label="Principal">

@@ -91,7 +91,7 @@ const schemas = {
     notes: z.string().trim().max(500).optional(),
   }),
   processCreate: z.object({
-    entityId: id,
+    entityId: id.optional(), // o terminal vem da sessão do transitário
     client: z.object({
       type: z.enum(['SINGULAR', 'EMPRESA']),
       name: text(160),
@@ -252,6 +252,13 @@ v1.post('/auth/login', loginLimiter, validate({ body: schemas.login }), async (r
   res.json(await auth.login(req.valid.body.email, req.valid.body.password));
 });
 v1.get('/auth/me', authenticate, (req, res) => res.json({ user: auth.publicUser(req.user) }));
+// Transitário: terminais a que tem acesso e entrada num deles (como a escolha entre JUP e Portal)
+v1.get('/auth/terminals', authenticate, requireRole(TRANSITARIO), async (req, res) =>
+  res.json({ terminals: await auth.forwarderTerminals(req.user), current: req.user.terminalId }),
+);
+v1.post('/auth/terminal', authenticate, requireRole(TRANSITARIO), validate({ body: z.object({ entityId: id }) }), async (req, res) =>
+  res.json(await auth.selectTerminal(req.user, req.valid.body.entityId)),
+);
 v1.post('/auth/change-password', authenticate, validate({ body: schemas.changePassword }), async (req, res) => {
   await auth.changePassword(req.user, req.valid.body.currentPassword, req.valid.body.newPassword);
   res.status(204).end();

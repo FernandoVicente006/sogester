@@ -39,6 +39,13 @@ export function AuthProvider({ children }) {
     setUser(r.user)
   }, [])
 
-  const value = useMemo(() => ({ user, loading, login, logout }), [user, loading, login, logout])
+  // Transitário: entra num terminal; o token novo limita a sessão a esse terminal.
+  const selectTerminal = useCallback(async (entityId) => {
+    const r = await api('POST', '/auth/terminal', { body: { entityId } })
+    setToken(r.token)
+    setUser(r.user)
+  }, [])
+
+  const value = useMemo(() => ({ user, loading, login, logout, selectTerminal }), [user, loading, login, logout, selectTerminal])
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
