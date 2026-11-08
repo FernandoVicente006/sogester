@@ -122,6 +122,7 @@ const schemas = {
   }),
   processList: z.object({
     status: z.string().trim().max(120).optional(), // um estado ou vários separados por vírgulas
+    archived: z.enum(['0', '1']).optional(),
     q: z.string().trim().max(100).optional(),
     entityId: id.optional(),
     forwarderId: id.optional(),

@@ -66,7 +66,7 @@ export default function Dashboard() {
           <Kpi icon="card" tone="amber" value={isForwarder ? stats.awaitingPayment : stats.awaitingPaymentValidation} label={isForwarder ? 'Pagamentos pendentes' : 'Comprovativos a validar'} to={isForwarder ? '/processos?status=PAGAMENTO_PENDENTE' : '/processos?status=PAGAMENTO_SUBMETIDO'} />
           <Kpi icon="zap" tone="red" value={stats.urgent} label="Urgências pedidas" />
           <Kpi icon="alert" tone="red" value={stats.overdue} label="Pagamentos em atraso" />
-          <Kpi icon="check" tone="green" value={stats.completed} label="Concluídos" to="/processos?status=CONCLUIDO" />
+          <Kpi icon="check" tone="green" value={stats.completed} label="Concluídos" to="/arquivados?status=CONCLUIDO" />
         </div>
       )}
 

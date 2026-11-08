@@ -160,6 +160,11 @@ test('fluxo normal, proforma, comprovativo, fatura recibo e saída antecipada', 
   await step(loja, '/receipt', 403, { id: p.id, req: { form: form({ number: 'FR-1' }, ['receipt']) } });
   const done = (await step(fat, '/receipt', 200, { id: p.id, req: { form: form({ number: 'FR 2026/001' }, ['receipt']) } })).process;
   assert.equal(done.status, 'CONCLUIDO');
+  assert.ok(done.archivedAt, 'concluído vai para o arquivo');
+  assert.ok(!(await api('GET', '/processes', { token: fwdA })).body.processes.some((x) => x.id === p.id), 'sai da lista atual');
+  const archive = (await api('GET', '/processes?archived=1', { token: fwdA })).body.processes;
+  assert.ok(archive.some((x) => x.id === p.id), 'aparece nos Arquivados');
+  assert.ok(!(await api('GET', '/processes?archived=1', { token: fwdB })).body.processes.some((x) => x.id === p.id), 'arquivo respeita o dono');
   assert.equal(done.invoice.receiptNumber, 'FR 2026/001');
   assert.deepEqual(done.history.map((h) => h.toStatus), [
     'SUBMETIDO', 'EM_ANALISE', 'EM_PROCESSAMENTO_INTERNO', 'PAGAMENTO_PENDENTE', 'PAGAMENTO_SUBMETIDO',

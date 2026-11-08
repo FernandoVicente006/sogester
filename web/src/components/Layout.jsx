@@ -64,6 +64,9 @@ export default function Layout() {
               </span>
             )}
           </NavLink>
+          <NavLink to="/arquivados">
+            <Icon name="file" /> Arquivados
+          </NavLink>
           {!['TRANSITARIO', 'PORTARIA'].includes(user.role) && (
             <NavLink to="/relatorios">
               <Icon name="chart" /> Relatórios

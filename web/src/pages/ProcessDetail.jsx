@@ -209,8 +209,8 @@ export default function ProcessDetail() {
 
   return (
     <>
-      <Link to="/processos" className="crumb">
-        <Icon name="back" /> Processos
+      <Link to={p.archivedAt ? '/arquivados' : '/processos'} className="crumb">
+        <Icon name="back" /> {p.archivedAt ? 'Arquivados' : 'Processos'}
       </Link>
       <div className="process-head">
         <h2>{p.reference}</h2>
@@ -218,6 +218,7 @@ export default function ProcessDetail() {
         {p.urgencyRequested && <span className="tag urgent">Urgente</span>}
         <span className={`tag prio-${p.cargoPriority}`}>{PRIORITY_LABELS[p.cargoPriority]}</span>
         {p.paymentOverdue && <span className="tag urgent">Pagamento em atraso</span>}
+        {p.archivedAt && <span className="tag">Arquivado em {formatDate(p.archivedAt)}</span>}
       </div>
       <Stepper process={p} />
       <ErrorBox message={error} />

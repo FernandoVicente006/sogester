@@ -23,6 +23,8 @@ export const STAFF_TRANSITIONS = {
   EM_PROCESSAMENTO_INTERNO: ['DOCUMENTOS_PENDENTES', 'REJEITADO'], // anomalia detetada nos procedimentos internos
 };
 const NOTES_REQUIRED = ['DOCUMENTOS_PENDENTES', 'REJEITADO'];
+/** Estados finais: o processo vai para os Arquivados. */
+export const ARCHIVED_STATUSES = ['CONCLUIDO', 'REJEITADO', 'CANCELADO'];
 
 const SELECT = `
   SELECT p.id, p.reference, p.entity_id AS entityId, e.code AS entityCode, p.forwarder_id AS forwarderId,
@@ -33,7 +35,7 @@ const SELECT = `
          p.quantity, p.weight_kg AS weightKg, p.vehicle_brand AS vehicleBrand, p.vehicle_model AS vehicleModel,
          p.container_plate AS containerPlate, p.container_type AS containerType,
          p.container_volume AS containerVolume, p.container_weight_kg AS containerWeightKg,
-         p.submitted_at AS submittedAt, p.updated_at AS updatedAt,
+         p.submitted_at AS submittedAt, p.updated_at AS updatedAt, p.archived_at AS archivedAt,
          c.id AS clientId, c.type AS clientType, c.name AS clientName, c.document_number AS clientDocument,
          c.is_foreign AS clientIsForeign,
          (pc.id IS NOT NULL) AS hasCommitment,
@@ -195,9 +197,9 @@ export async function insertDocument(conn, processId, kind, file, userId) {
 }
 
 /** Fila: staff vê por prioridade (urgência, tipo de carga, ordem de chegada); transitário, mais recentes primeiro. */
-export async function listProcesses(actor, { status, q, entityId, forwarderId } = {}) {
+export async function listProcesses(actor, { status, q, entityId, forwarderId, archived = false } = {}) {
   const scope = scopeClause(actor);
-  const where = [scope.sql];
+  const where = [scope.sql, archived ? 'p.archived_at IS NOT NULL' : 'p.archived_at IS NULL'];
   const params = [...scope.params];
   if (status) (where.push('p.status IN (?)'), params.push(status.split(',')));
   if (q) {
@@ -207,9 +209,11 @@ export async function listProcesses(actor, { status, q, entityId, forwarderId } 
   if (isSuperAdmin(actor) && entityId) (where.push('p.entity_id = ?'), params.push(entityId));
   if (!isForwarder(actor) && forwarderId) (where.push('p.forwarder_id = ?'), params.push(forwarderId));
 
-  const order = isForwarder(actor)
-    ? 'p.submitted_at DESC, p.id DESC'
-    : "(p.status IN ('CONCLUIDO','REJEITADO','CANCELADO')) ASC, p.urgency_requested DESC, p.priority_rank ASC, p.submitted_at ASC, p.id ASC";
+  const order = archived
+    ? 'p.archived_at DESC, p.id DESC'
+    : isForwarder(actor)
+      ? 'p.submitted_at DESC, p.id DESC'
+      : 'p.urgency_requested DESC, p.priority_rank ASC, p.submitted_at ASC, p.id ASC';
   const rows = await query(`${SELECT} WHERE ${where.join(' AND ')} ORDER BY ${order} LIMIT 200`, params);
   const unread = await unreadByProcess(actor, rows.map((r) => r.id));
   return rows.map((r) => ({ ...mapProcess(r), unreadMessages: unread.get(r.id) ?? 0 }));
@@ -308,12 +312,12 @@ export async function getProcess(actor, id) {
 
 /** Muda o estado só se ainda for o que o ator viu (evita duas ações concorrentes sobre o mesmo processo). */
 export async function changeStatus(actor, process, toStatus, notes, conn = pool) {
-  const [res] = await conn.query('UPDATE processes SET status = ?, status_notes = ? WHERE id = ? AND status = ?', [
-    toStatus,
-    notes ?? null,
-    process.id,
-    process.status,
-  ]);
+  // Estados finais arquivam o processo; reabrir um rejeitado tira-o do arquivo.
+  const [res] = await conn.query(
+    `UPDATE processes SET status = ?, status_notes = ?, archived_at = ${ARCHIVED_STATUSES.includes(toStatus) ? 'NOW()' : 'NULL'}
+      WHERE id = ? AND status = ?`,
+    [toStatus, notes ?? null, process.id, process.status],
+  );
   if (!res.affectedRows) throw conflict('O processo foi alterado entretanto; atualize a página', 'STALE_STATE');
   await conn.query(
     'INSERT INTO process_status_history (process_id, from_status, to_status, changed_by, notes) VALUES (?, ?, ?, ?, ?)',

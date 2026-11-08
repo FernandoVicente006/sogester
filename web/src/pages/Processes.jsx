@@ -6,12 +6,15 @@ import { Empty, ErrorBox, Icon, PRIORITY_LABELS, PROCESS_STATUS_LABELS, PageHead
 
 const PAYMENT_QUEUE = 'PAGAMENTO_SUBMETIDO,PAGAMENTO_CONFIRMADO,PAGAMENTO_PENDENTE'
 
-export default function Processes() {
+const CLOSED = ['CONCLUIDO', 'REJEITADO', 'CANCELADO']
+
+/** Lista atual (por defeito) ou Arquivados: processos concluídos, rejeitados e cancelados. */
+export default function Processes({ archived = false }) {
   const { user } = useAuth()
   const isForwarder = user.role === 'TRANSITARIO'
   const [params, setParams] = useSearchParams()
   const isFinance = user.role === 'FINANCAS'
-  const status = params.get('status') ?? (isFinance ? PAYMENT_QUEUE : '')
+  const status = params.get('status') ?? (isFinance && !archived ? PAYMENT_QUEUE : '')
   const [items, setItems] = useState([])
   const [q, setQ] = useState('')
   const [error, setError] = useState('')
@@ -22,6 +25,7 @@ export default function Processes() {
       const query = new URLSearchParams()
       if (q) query.set('q', q)
       if (status) query.set('status', status)
+      if (archived) query.set('archived', '1')
       setItems((await api('GET', `/processes?${query}`)).processes)
       setError('')
     } catch (err) {
@@ -29,7 +33,7 @@ export default function Processes() {
     } finally {
       setLoaded(true)
     }
-  }, [q, status])
+  }, [q, status, archived])
 
   useEffect(() => {
     const t = setTimeout(load, 250)
@@ -39,10 +43,18 @@ export default function Processes() {
   return (
     <>
       <PageHeader
-        title={isForwarder ? 'Os meus processos' : isFinance ? 'Fila de pagamentos' : 'Fila de processos'}
-        subtitle={isForwarder ? 'Todos os processos submetidos por si.' : isFinance ? 'Comprovativos por validar, recibos por enviar e pagamentos pendentes.' : 'Ordem: urgência pedida, tipo de carga e ordem de chegada.'}
+        title={archived ? 'Arquivados' : isForwarder ? 'Os meus processos' : isFinance ? 'Fila de pagamentos' : 'Fila de processos'}
+        subtitle={
+          archived
+            ? 'Processos concluídos, rejeitados e cancelados. Ficam guardados para consulta.'
+            : isForwarder
+              ? 'Processos em curso. Os terminados passam para os Arquivados.'
+              : isFinance
+                ? 'Comprovativos por validar, recibos por enviar e pagamentos pendentes.'
+                : 'Ordem: urgência pedida, tipo de carga e ordem de chegada.'
+        }
       >
-        {isForwarder && (
+        {isForwarder && !archived && (
           <Link to="/processos/novo" className="button primary">
             <Icon name="plus" /> Novo processo
           </Link>
@@ -53,12 +65,14 @@ export default function Processes() {
         <SearchInput value={q} onChange={setQ} placeholder="Pesquisar referência, cliente, documento ou transitário" />
         <select
           value={status}
-          onChange={(e) => setParams(e.target.value || isFinance ? { status: e.target.value } : {})}
+          onChange={(e) => setParams(e.target.value || (isFinance && !archived) ? { status: e.target.value } : {})}
           aria-label="Filtrar por estado"
         >
-          {isFinance && <option value={PAYMENT_QUEUE}>Fila de pagamentos</option>}
+          {isFinance && !archived && <option value={PAYMENT_QUEUE}>Fila de pagamentos</option>}
           <option value="">Todos os estados</option>
-          {Object.entries(PROCESS_STATUS_LABELS).map(([k, v]) => (
+          {Object.entries(PROCESS_STATUS_LABELS)
+            .filter(([k]) => CLOSED.includes(k) === archived)
+            .map(([k, v]) => (
             <option key={k} value={k}>
               {v}
             </option>
@@ -76,7 +90,7 @@ export default function Processes() {
               <th>Cliente</th>
               <th>Carga</th>
               <th>Estado</th>
-              <th>Submetido</th>
+              <th>{archived ? 'Arquivado' : 'Submetido'}</th>
             </tr>
           </thead>
           <tbody>
@@ -100,12 +114,12 @@ export default function Processes() {
                 <td>
                   <ProcessBadge status={p.status} />
                 </td>
-                <td className="muted">{formatDate(p.submittedAt)}</td>
+                <td className="muted">{formatDate(archived ? p.archivedAt : p.submittedAt)}</td>
               </tr>
             ))}
           </tbody>
         </table>
-        {loaded && !items.length && <Empty icon="clipboard">Sem processos para os filtros escolhidos.</Empty>}
+        {loaded && !items.length && <Empty icon="clipboard">{archived ? 'Ainda não há processos arquivados.' : 'Sem processos para os filtros escolhidos.'}</Empty>}
       </div>
     </>
   )

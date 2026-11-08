@@ -26,6 +26,8 @@ Camada digital entre transitários e a Sogester (terminais de Cabinda, Soyo e Lu
   depois da aprovação documental o processo segue até ao fim, e nunca se cancela com saída antecipada ativa (a dívida
   não se apaga). Exceções do administrador: revogar a saída antecipada (o código fica inválido), prorrogar o prazo de pagamento (máx. 2×, até 7 dias, sempre
   justificado) e reabrir processos rejeitados. Tudo fica no histórico/auditoria e o transitário é notificado.
+- Arquivados: processos concluídos, rejeitados e cancelados saem da lista atual para /arquivados (com pesquisa);
+  continuam guardados, a numeração não muda e reabrir um rejeitado tira-o do arquivo.
 - Passo 7: relatórios (/relatorios) com exportação CSV e impressão/PDF. Processos (estados, prioridades, tempos
   médios até autorizar e concluir; todo o pessoal), Receita (faturado, cobrado e em aberto por mês e transitário) e
   Atrasos (pagamentos vencidos e processos parados, com quem tem de agir; só administrador, Finanças e Chefe comercial). O CSV usa

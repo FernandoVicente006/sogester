@@ -230,6 +230,7 @@ test('cancelamento de processos e exceções após a autorização', async () =>
   assert.equal((await post(loja, p7.id, '/reopen', { reason: 'Documentos corrigidos' })).status, 403);
   const reopened = await ok(admin, p7.id, '/reopen', { reason: 'Documentos corrigidos pelo transitário' });
   assert.equal(reopened.status, 'EM_ANALISE');
+  assert.equal(reopened.archivedAt, null, 'reabrir tira do arquivo');
   assert.ok((await inbox(fwdA)).includes('PROCESS_REOPENED'));
 
   // cancelamento administrativo enquanto os documentos estão em análise

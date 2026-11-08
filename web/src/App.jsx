@@ -54,6 +54,7 @@ export default function App() {
         <Route path="transitarios" element={<Forwarders />} />
         <Route path="transitarios/:id" element={<ForwarderDetail />} />
         <Route path="processos" element={<Processes />} />
+        <Route path="arquivados" element={<Processes archived key="arquivados" />} />
         <Route
           path="processos/novo"
           element={
