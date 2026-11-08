@@ -135,11 +135,11 @@ test('relatórios: processos, receita e atrasos (filtros, permissões e CSV)', a
   await post(fat, p1.id, '/receipt', { form: file('receipt', { number: 'FR-1' }) });
 
   const p2 = await submit(fwdA, { cargoPriority: 'PERECIVEL', cargoCategory: 'Mercadoria frigorífica ou congelada', description: 'Peixe' });
-  await post(fwdA, p2.id, '/commitment', { body: { password: 'Senha1234', accept: true } });
   await post(admin, p2.id, '/transition', { body: { status: 'EM_ANALISE' } });
-  await post(admin, p2.id, '/authorization', { body: {} });
+  await post(admin, p2.id, '/authorization', { body: { reason: 'Avaria do pórtico da Sogester impede a saída normal', validDays: 2 } });
+  await post(fwdA, p2.id, '/commitment', { body: { password: 'Senha1234', accept: true } });
   await post(loja, p2.id, '/transition', { body: { status: 'EM_PROCESSAMENTO_INTERNO' } });
-  await proforma(p2.id, 2000);
+  await post(loja, p2.id, '/proforma', { form: file('proforma', { number: `PF-${p2.id}`, amount: 2000, paymentEntity: '11111', paymentReference: `REF${p2.id}`, dueDate: new Date(Date.now() + 86400000).toISOString().slice(0, 10) }) });
 
   const p3 = await submit(fwdB);
   await approve(p3.id);

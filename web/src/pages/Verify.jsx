@@ -1,7 +1,15 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { api, errorText } from '../api.js'
+import { api, errorText, getToken } from '../api.js'
 import { ErrorBox, formatDate } from '../components/ui.jsx'
+
+const STATE_TEXT = {
+  INVALIDA: 'Código inválido: esta autorização não foi emitida pela Sogester.',
+  REVOGADA: 'Autorização revogada pela Sogester: não permite a saída.',
+  AGUARDA_ACEITE: 'Autorização ainda sem o aceite do transitário: não permite a saída.',
+  USADA: 'Autorização já usada: vale para uma única saída.',
+  EXPIRADA: 'Autorização expirada: não permite a saída.',
+}
 
 /** Verificação pública de uma autorização digital (sem sessão): confirma autenticidade sem expor dados do cliente. */
 export default function Verify() {
@@ -22,7 +30,7 @@ export default function Verify() {
         Código <code>{code}</code>
       </p>
       <ErrorBox message={error} />
-      {result && !result.valid && <p className="error">Código inválido: esta autorização não foi emitida pela Sogester.</p>}
+      {result && !result.valid && <p className="error">{STATE_TEXT[result.state] ?? STATE_TEXT.INVALIDA}</p>}
       {result?.valid && (
         <>
           <p className="ok">✔ Autorização autêntica</p>
@@ -37,10 +45,23 @@ export default function Verify() {
             <dd>{result.type === 'SAIDA_ANTECIPADA' ? 'Saída antecipada' : 'Padrão'}</dd>
             <dt>Emitida em</dt>
             <dd>{formatDate(result.issuedAt)}</dd>
+            {result.validUntil && (
+              <>
+                <dt>Válida até</dt>
+                <dd>{formatDate(result.validUntil)}</dd>
+              </>
+            )}
             <dt>Pagamento</dt>
             <dd>{result.paymentSettled ? 'Liquidado' : 'Pendente'}</dd>
           </dl>
         </>
+      )}
+      {getToken() && (
+        <p>
+          <Link className="button" to={`/portaria?codigo=${encodeURIComponent(code)}`}>
+            Abrir na portaria
+          </Link>
+        </p>
       )}
       <p className="muted small">
         <Link to="/login">Sogester</Link>

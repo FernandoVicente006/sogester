@@ -53,6 +53,12 @@ export default function Layout() {
           </div>
         )}
         <nav aria-label="Principal">
+          {['PORTARIA', 'ADMIN_ENTIDADE', 'SUPER_ADMIN'].includes(user.role) && (
+            <NavLink to="/portaria">
+              <Icon name="shield" /> Portaria
+            </NavLink>
+          )}
+          {user.role !== 'PORTARIA' && (<>
           <NavLink to="/painel">
             <Icon name="dashboard" /> Painel
           </NavLink>
@@ -75,6 +81,7 @@ export default function Layout() {
           <NavLink to="/transitarios">
             <Icon name="truck" /> {user.role === 'TRANSITARIO' ? 'O meu perfil' : 'Transitários'}
           </NavLink>
+          </>)}
           {isAdmin && (
             <NavLink to="/funcionarios">
               <Icon name="users" /> Funcionários

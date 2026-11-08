@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { pool, query, queryOne, withTransaction } from '../db/pool.js';
 import { badRequest, conflict, forbidden, notFound } from '../errors.js';
 import { CARGO_PRIORITIES, DOCUMENT_KINDS, UPLOADABLE_KINDS, VOLUME_TYPES, isVehicleCategory } from '../cargo.js';
-import { isForwarder, isSuperAdmin } from '../roles.js';
+import { ROLES, isForwarder, isSuperAdmin } from '../roles.js';
 import { audit } from './audit.js';
 import { isApprovedIn } from './forwarders.js';
 import { notifyProcessEvent } from './notifications.js';
@@ -79,6 +79,8 @@ function mapProcess(r) {
 
 /** Condição SQL que limita os processos visíveis ao ator. */
 export function scopeClause(actor) {
+  // A Portaria só verifica autorizações pelo código; não consulta processos.
+  if (actor.role === ROLES.PORTARIA) throw forbidden('A Portaria só verifica autorizações');
   if (isForwarder(actor)) return { sql: 'p.forwarder_id = ?', params: [actor.forwarderId] };
   if (isSuperAdmin(actor)) return { sql: '1 = 1', params: [] };
   return { sql: 'p.entity_id = ?', params: [actor.entityId] };
@@ -325,8 +327,12 @@ export async function getProcess(actor, id) {
       [id],
     ),
     queryOne(
-      `SELECT a.code, a.type, a.issued_at AS issuedAt, a.notes, u.name AS issuedBy
-         FROM authorizations a JOIN users u ON u.id = a.issued_by WHERE a.process_id = ? AND a.revoked_at IS NULL`,
+      `SELECT a.code, a.type, a.issued_at AS issuedAt, a.notes, a.reason, a.valid_until AS validUntil,
+              (a.commitment_id IS NOT NULL) AS accepted, a.used_at AS usedAt, g.name AS usedBy, u.name AS issuedBy
+         FROM authorizations a
+         JOIN users u ON u.id = a.issued_by
+         LEFT JOIN users g ON g.id = a.used_by
+        WHERE a.process_id = ? AND a.revoked_at IS NULL`,
       [id],
     ),
     queryOne(
@@ -384,7 +390,7 @@ export async function getProcess(actor, id) {
     goods: goods.map((g) => ({ ...g, quantity: num(g.quantity), weightKg: num(g.weightKg) })),
     issues,
     commitment: commitment ? { ...commitment, extensions, extensionsLeft: Math.max(0, MAX_EXTENSIONS - commitment.extensionCount) } : null,
-    authorization: authorization ?? null,
+    authorization: authorization ? { ...authorization, accepted: !!authorization.accepted } : null,
     invoice: invoice ? { ...invoice, amount: num(invoice.amount) } : null,
   };
 }

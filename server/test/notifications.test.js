@@ -222,14 +222,14 @@ test('notificações: destinatários, e-mail, preferências, chat e prazos', asy
   assert.deepEqual(await processOutbox(), { sent: 0, failed: 0, skipped: 0 }, 'falhados não voltam a ser tentados');
 
   // --- prazos de pagamento (carga perecível com compromisso)
-  const per = (await api('POST', '/processes', { token: fwdA, form: submission({ cargoPriority: 'PERECIVEL', cargoCategory: 'Mercadoria frigorífica ou congelada', description: 'Peixe' }) })).body.process;
+  const per = (await api('POST', '/processes', { token: fwdA, form: submission() })).body.process;
+  await step(loja, `/processes/${per.id}/transition`, 200, { body: { status: 'EM_ANALISE' } });
+  await step(admin, `/processes/${per.id}/authorization`, 201, { body: { reason: 'Avaria do pórtico da Sogester impede a saída normal', validDays: 2 } });
+  assert.ok((await inbox(fat)).notifications.some((n) => n.type === 'AUTHORIZATION_ISSUED' && /saída antecipada/i.test(n.title)));
+  assert.ok((await inbox(fwdA)).notifications.some((n) => n.type === 'AUTHORIZATION_ISSUED' && /Aceite o compromisso/.test(n.body)));
   await step(fwdA, `/processes/${per.id}/commitment`, 201, { body: { password: 'Senha1234', accept: true } });
   assert.equal((await unreadMsgs(admin)).length, 1);
   assert.ok((await inbox(admin)).notifications.some((n) => n.type === 'COMMITMENT_SIGNED'));
-  await step(loja, `/processes/${per.id}/transition`, 200, { body: { status: 'EM_ANALISE' } });
-  await step(admin, `/processes/${per.id}/authorization`, 201, { body: {} });
-  assert.ok((await inbox(fat)).notifications.some((n) => n.type === 'AUTHORIZATION_ISSUED' && /saída antecipada/i.test(n.title)));
-  assert.ok((await inbox(fwdA)).notifications.some((n) => n.type === 'AUTHORIZATION_ISSUED'));
 
   assert.deepEqual(await runPaymentChecks(), { dueSoon: 0, overdue: 0 }); // prazo de 3 dias: ainda longe
   await pool.query('UPDATE payment_commitments SET due_at = DATE_ADD(NOW(), INTERVAL 12 HOUR) WHERE process_id = ?', [per.id]);

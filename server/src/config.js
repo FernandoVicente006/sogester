@@ -20,8 +20,6 @@ export const config = {
   setupToken: process.env.SETUP_TOKEN ?? '',
   // Chave que assina os códigos de autorização digital (independente do JWT para poder rodar este sem invalidar autorizações).
   authorizationSecret: required('AUTHORIZATION_SECRET'),
-  // Dias que o transitário tem para liquidar após uma saída antecipada (carga perecível).
-  commitmentDays: Number(process.env.PAYMENT_COMMITMENT_DAYS ?? 3),
   // URL pública do frontend (links nos e-mails).
   appUrl: process.env.APP_URL ?? 'http://localhost:5173',
   // E-mail por SMTP; sem SMTP_HOST as notificações ficam só dentro da plataforma.

@@ -164,6 +164,10 @@ const schemas = {
   cancellationDecision: z.object({ approve: z.boolean(), notes: z.string().trim().max(500).optional() }),
   extendDeadline: z.object({ days: z.number().int().min(1).max(7), reason: z.string().trim().min(5, 'Indique o motivo (mín. 5 caracteres)').max(500) }),
   commitmentSign: z.object({ password: z.string().min(1).max(100), accept: z.boolean() }),
+  earlyRelease: z.object({
+    reason: z.string().trim().min(10, 'Descreva o problema da Sogester que impede a saída (mín. 10 caracteres)').max(500),
+    validDays: z.number().int().min(1).max(15).default(3),
+  }),
   optionalNotes: z.object({ notes: z.string().trim().max(500).optional() }),
   requiredNotes: z.object({ notes: z.string().trim().min(1, 'Indique o motivo').max(500) }),
   proforma: z.object({
@@ -172,6 +176,7 @@ const schemas = {
     currency: z.string().trim().toUpperCase().length(3).optional(),
     paymentEntity: text(40).optional(),
     paymentReference: text(60).optional(),
+    dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use o formato AAAA-MM-DD').refine((d) => d >= new Date().toISOString().slice(0, 10), 'A data limite não pode ser no passado').optional(),
   }),
   receipt: z.object({ number: text(40).optional() }),
   authorizationCode: z.object({ code: z.string().regex(/^AUT-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}$/i).transform((c) => c.toUpperCase()) }),
@@ -516,7 +521,7 @@ v1.post(
   '/processes/:id/authorization',
   authenticate,
   requireRole(...AUTHORIZERS),
-  validate({ params: idParam, body: schemas.optionalNotes }),
+  validate({ params: idParam, body: schemas.earlyRelease }),
   async (req, res) =>
     res.status(201).json({ process: await billing.issueAuthorization(req.user, req.valid.params.id, req.valid.body) }),
 );
@@ -685,4 +690,11 @@ const verifyLimiter = rateLimit({
 });
 v1.get('/verify/authorization/:code', verifyLimiter, validate({ params: schemas.authorizationCode }), async (req, res) =>
   res.json(await billing.verifyAuthorization(req.valid.params.code)),
+);
+// Portaria: dados da carga para conferir e registo da saída (uso único)
+v1.get('/gate/authorization/:code', authenticate, validate({ params: schemas.authorizationCode }), async (req, res) =>
+  res.json(await billing.gateDetails(req.user, req.valid.params.code)),
+);
+v1.post('/gate/authorization/:code/use', authenticate, validate({ params: schemas.authorizationCode }), async (req, res) =>
+  res.json(await billing.useAuthorization(req.user, req.valid.params.code)),
 );

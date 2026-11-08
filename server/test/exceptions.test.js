@@ -120,11 +120,12 @@ test('cancelamento de processos e exceções após a autorização', async () =>
     await ok(loja, id, '/transition', { status: 'EM_ANALISE' });
     return ok(loja, id, '/transition', { status: 'EM_PROCESSAMENTO_INTERNO' });
   };
-  const proforma = (id) =>
+  const proforma = (id, extra = {}) =>
     api('POST', `/processes/${id}/proforma`, {
       token: loja,
-      form: file('proforma', { number: 'PF-1', amount: 1000, paymentEntity: '11111', paymentReference: '123456789' }),
+      form: file('proforma', { number: 'PF-1', amount: 1000, paymentEntity: '11111', paymentReference: '123456789', ...extra }),
     });
+  const release = { reason: 'Avaria do pórtico da Sogester impede a saída normal', validDays: 2 };
   const proof = (id) => api('POST', `/processes/${id}/payment-proof`, { token: fwdA, form: file('proof') });
 
   // =========== cancelamento direto enquanto os documentos estão em análise ===========
@@ -163,10 +164,10 @@ test('cancelamento de processos e exceções após a autorização', async () =>
   assert.equal(await code(admin, p3.id, '/cancel', { reason: 'Cancelamento administrativo' }), 'NOT_CANCELLABLE');
 
   // =========== saída antecipada: dívida não se apaga; prorrogação limitada ===========
-  const per = await submit(fwdA, { cargoPriority: 'PERECIVEL', cargoCategory: 'Mercadoria frigorífica ou congelada', description: 'Peixe' });
-  await ok(fwdA, per.id, '/commitment', { password: 'Senha1234', accept: true }, 201);
+  const per = await submit(fwdA);
   await ok(loja, per.id, '/transition', { status: 'EM_ANALISE' });
-  const early = await ok(chefe, per.id, '/authorization', {}, 201);
+  const early = await ok(chefe, per.id, '/authorization', release, 201);
+  await ok(fwdA, per.id, '/commitment', { password: 'Senha1234', accept: true }, 201);
   assert.equal(early.authorization.type, 'SAIDA_ANTECIPADA');
   assert.equal(await code(fwdA, per.id, '/cancellation', { reason: 'Quero cancelar a carga' }), 'EARLY_RELEASE_BINDING');
   assert.equal(await code(admin, per.id, '/cancel', { reason: 'Cancelamento administrativo' }), 'EARLY_RELEASE_BINDING');
@@ -197,12 +198,12 @@ test('cancelamento de processos e exceções após a autorização', async () =>
   assert.equal((await code(admin, per.id, '/extend-deadline', { days: 1, reason: 'Mais uma prorrogação' })), 'EXTENSION_LIMIT');
 
   // =========== revogação de autorização ===========
-  const p6 = await submit(fwdA, { cargoPriority: 'PERECIVEL', cargoCategory: 'Mercadoria frigorífica ou congelada', description: 'Carne' });
+  const p6 = await submit(fwdA);
   assert.equal(await code(admin, p6.id, '/extend-deadline', { days: 2, reason: 'Sem compromisso de pagamento' }), 'NO_DEADLINE');
   await pool.query('UPDATE payment_commitments SET due_at = NULL WHERE process_id = ?', [per.id]); // o compromisso em atraso bloquearia este
-  await ok(fwdA, p6.id, '/commitment', { password: 'Senha1234', accept: true }, 201);
   await approve(p6.id);
-  const auth6 = await ok(admin, p6.id, '/authorization', {}, 201);
+  const auth6 = await ok(admin, p6.id, '/authorization', release, 201);
+  await ok(fwdA, p6.id, '/commitment', { password: 'Senha1234', accept: true }, 201);
   const oldCode = auth6.authorization.code;
   assert.equal((await post(loja, p6.id, '/authorization/revoke', { reason: 'Documento errado' })).status, 403);
   assert.equal((await post(fat, p6.id, '/authorization/revoke', { reason: 'Documento errado' })).status, 403);
@@ -212,17 +213,20 @@ test('cancelamento de processos e exceções após a autorização', async () =>
   assert.equal(revoked.authorization, null);
   assert.equal(revoked.commitment.dueAt, null, 'sem saída antecipada não há prazo');
   assert.ok((await inbox(fwdA)).includes('AUTHORIZATION_REVOKED'));
-  assert.deepEqual((await api('GET', `/verify/authorization/${oldCode}`)).body, { valid: false, revoked: true, reference: p6.reference });
+  const revokedCheck = (await api('GET', `/verify/authorization/${oldCode}`)).body;
+  assert.deepEqual([revokedCheck.valid, revokedCheck.state, revokedCheck.reference], [false, 'REVOGADA', p6.reference]);
   assert.equal(await code(admin, p6.id, '/authorization/revoke', { reason: 'Revogar outra vez' }), 'NO_AUTHORIZATION');
 
-  const reissued = await ok(chefe, p6.id, '/authorization', {}, 201);
+  const reissued = await ok(chefe, p6.id, '/authorization', release, 201);
   assert.notEqual(reissued.authorization.code, oldCode, 'nova autorização, novo código');
+  assert.equal((await proforma(p6.id)).body.error.code, 'AUTHORIZATION_AWAITING_ACCEPTANCE', 'proforma espera o aceite');
+  await ok(fwdA, p6.id, '/commitment', { password: 'Senha1234', accept: true }, 201);
   assert.equal((await api('GET', `/verify/authorization/${reissued.authorization.code}`)).body.valid, true);
   assert.equal((await api('GET', `/verify/authorization/${oldCode}`)).body.revoked, true);
   const [[active]] = await pool.query('SELECT COUNT(*) AS n FROM authorizations WHERE process_id = ? AND revoked_at IS NULL', [p6.id]);
   assert.equal(active.n, 1, 'uma só autorização ativa');
 
-  await proforma(p6.id);
+  assert.equal((await proforma(p6.id, { dueDate: new Date(Date.now() + 86400000).toISOString().slice(0, 10) })).status, 200);
   await proof(p6.id);
   await ok(fat, p6.id, '/confirm-payment', {});
   assert.equal(await code(admin, p6.id, '/authorization/revoke', { reason: 'O pagamento já foi confirmado' }), 'INVALID_TRANSITION');

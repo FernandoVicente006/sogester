@@ -14,9 +14,14 @@ import Verify from './pages/Verify.jsx'
 import Dashboard from './pages/Dashboard.jsx'
 import Notifications from './pages/Notifications.jsx'
 import Reports from './pages/Reports.jsx'
+import EarlyRelease from './pages/EarlyRelease.jsx'
+import Gate from './pages/Gate.jsx'
 
 /** Página inicial: a fila de processos (cada perfil já vê só o que lhe cabe). */
-const Home = () => <Navigate to="/painel" replace />
+function Home() {
+  const { user } = useAuth()
+  return <Navigate to={user?.role === 'PORTARIA' ? '/portaria' : '/painel'} replace />
+}
 
 function Protected({ roles, allow, children }) {
   const { user, loading } = useAuth()
@@ -64,6 +69,15 @@ export default function App() {
           }
         />
         <Route path="processos/:id" element={<ProcessDetail />} />
+        <Route path="processos/:id/saida-antecipada" element={<EarlyRelease />} />
+        <Route
+          path="portaria"
+          element={
+            <Protected roles={['PORTARIA', 'ADMIN_ENTIDADE', 'SUPER_ADMIN']}>
+              <Gate />
+            </Protected>
+          }
+        />
         <Route
           path="funcionarios"
           element={

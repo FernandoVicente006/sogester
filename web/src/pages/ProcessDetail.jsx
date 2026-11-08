@@ -54,7 +54,14 @@ const DOC_LABELS = {
   COMPROVATIVO: 'Comprovativo de pagamento',
   FATURA_RECIBO: 'Fatura recibo',
 }
-const SIGNABLE = ['SUBMETIDO', 'EM_ANALISE', 'DOCUMENTOS_PENDENTES', 'DOCUMENTOS_SUBMETIDOS', 'EM_PROCESSAMENTO_INTERNO']
+const AUTHORIZABLE = ['EM_ANALISE', 'DOCUMENTOS_SUBMETIDOS', 'EM_PROCESSAMENTO_INTERNO']
+/** Estado da saída antecipada para mostrar ao utilizador. */
+function releaseState(a) {
+  if (!a.accepted) return 'Aguarda o aceite do transitário'
+  if (a.usedAt) return `Usada na portaria em ${formatDate(a.usedAt)}${a.usedBy ? ` (${a.usedBy})` : ''}`
+  if (a.validUntil && new Date(a.validUntil) < new Date()) return 'Expirada'
+  return a.validUntil ? `Válida até ${formatDate(a.validUntil)}` : 'Válida'
+}
 const AUTHORIZERS = ['SUPER_ADMIN', 'ADMIN_ENTIDADE', 'CHEFE_COMERCIAL']
 const PROFORMA_UPLOADERS = ['SUPER_ADMIN', 'ADMIN_ENTIDADE', 'LOJA']
 const FINANCE = ['SUPER_ADMIN', 'ADMIN_ENTIDADE', 'FINANCAS']
@@ -115,7 +122,8 @@ export default function ProcessDetail() {
   const [dialogDays, setDialogDays] = useState(3)
   const [terms, setTerms] = useState(null)
   const [sign, setSign] = useState({ password: '', accept: false })
-  const [proforma, setProforma] = useState({ number: '', amount: '', paymentEntity: '', paymentReference: '', file: null })
+  const [release, setRelease] = useState({ reason: '', validDays: 3 })
+  const [proforma, setProforma] = useState({ number: '', amount: '', paymentEntity: '', paymentReference: '', dueDate: '', file: null })
   const [receipt, setReceipt] = useState({ number: '', file: null })
   const [proofFile, setProofFile] = useState(null)
   const [paying, setPaying] = useState(false)
@@ -126,7 +134,7 @@ export default function ProcessDetail() {
   }, [id, run])
 
   const needsCommitment =
-    user.role === 'TRANSITARIO' && p?.cargoPriority === 'PERECIVEL' && !p.hasCommitment && SIGNABLE.includes(p.status)
+    user.role === 'TRANSITARIO' && p?.authorization && !p.authorization.accepted && AUTHORIZABLE.includes(p.status)
   useEffect(() => {
     if (!needsCommitment) return
     api('GET', `/processes/${id}/commitment-terms`)
@@ -138,7 +146,7 @@ export default function ProcessDetail() {
 
   const isForwarder = user.role === 'TRANSITARIO'
   const actions = REVIEWERS.includes(user.role) ? (STAFF_ACTIONS[p.status] ?? []) : []
-  const canAuthorize = AUTHORIZERS.includes(user.role) && ['EM_ANALISE', 'DOCUMENTOS_SUBMETIDOS', 'EM_PROCESSAMENTO_INTERNO'].includes(p.status) && p.hasCommitment && !p.authorization
+  const canAuthorize = AUTHORIZERS.includes(user.role) && AUTHORIZABLE.includes(p.status) && !p.authorization
   const canUploadProforma = PROFORMA_UPLOADERS.includes(user.role)
   const isFinance = FINANCE.includes(user.role)
   const earlyRelease = p.authorization?.type === 'SAIDA_ANTECIPADA'
@@ -221,7 +229,7 @@ export default function ProcessDetail() {
         <ProcessBadge status={p.status} />
         {p.urgencyRequested && <span className="tag urgent">Urgente</span>}
         <span className={`tag prio-${p.cargoPriority}`}>{PRIORITY_LABELS[p.cargoPriority]}</span>
-        {p.paymentOverdue && <span className="tag urgent">Pagamento em atraso</span>}
+        {p.paymentOverdue && <span className="tag urgent">Em incumprimento</span>}
         {p.archivedAt && <span className="tag">Arquivado em {formatDate(p.archivedAt)}</span>}
       </div>
       <Stepper process={p} />
@@ -398,9 +406,9 @@ export default function ProcessDetail() {
 
       {needsCommitment && terms && (
         <section className="card stack">
-          <h3><Icon name="shield" /> Compromisso de pagamento</h3>
+          <h3><Icon name="shield" /> Aceitar a saída antecipada</h3>
           <p className="muted">
-            Para a Sogester poder emitir a saída antecipada da carga, assine o compromisso abaixo.
+            A Sogester autorizou a saída antecipada da carga. Para poder imprimir a autorização, aceite o compromisso de pagamento abaixo.
           </p>
           <blockquote className="terms">{terms.text}</blockquote>
           <form
@@ -419,7 +427,7 @@ export default function ProcessDetail() {
               <input type="password" value={sign.password} onChange={(e) => setSign({ ...sign, password: e.target.value })} required />
             </Field>
             <button className="primary" disabled={!sign.accept}>
-              Assinar compromisso
+              Aceitar e assinar
             </button>
           </form>
         </section>
@@ -427,9 +435,9 @@ export default function ProcessDetail() {
 
       {p.commitment && (
         <p className={p.paymentOverdue ? 'notice danger' : 'notice'}>
-          Compromisso de pagamento assinado por {p.commitment.signedBy} em {formatDate(p.commitment.signedAt)}.
-          {p.commitment.dueAt && ` Prazo para liquidar: ${formatDate(p.commitment.dueAt)}.`}
-          {p.paymentOverdue && ' PAGAMENTO EM ATRASO.'}
+          Compromisso de pagamento aceite por {p.commitment.signedBy} em {formatDate(p.commitment.signedAt)}.
+          {p.commitment.dueAt ? ` Data limite de pagamento: ${formatDate(p.commitment.dueAt)}.` : ' A data limite é fixada com a proforma.'}
+          {p.paymentOverdue && ' PROCESSO EM INCUMPRIMENTO: a Sogester pode aplicar multa.'}
           {p.commitment.extensions?.length > 0 &&
             ` Prorrogado ${p.commitment.extensions.length}× (último: +${p.commitment.extensions.at(-1).days} dia(s), ${p.commitment.extensions.at(-1).reason}).`}
         </p>
@@ -438,12 +446,33 @@ export default function ProcessDetail() {
       {canAuthorize && (
         <section className="card stack">
           <h3><Icon name="shield" /> Saída antecipada</h3>
-          <p className="muted">Exceção: autoriza a saída da carga antes do pagamento, com o compromisso já assinado pelo transitário.</p>
-          <div>
-            <button className="primary" onClick={() => post('/authorization', { body: {} })}>
-              Emitir saída antecipada
-            </button>
-          </div>
+          <p className="muted">
+            Só para problemas da Sogester que impedem a saída da carga. O transitário tem de aceitar o compromisso de pagamento
+            antes de imprimir a autorização, que vale para uma única saída.
+          </p>
+          <form
+            className="stack"
+            onSubmit={(e) => {
+              e.preventDefault()
+              post('/authorization', { body: { reason: release.reason.trim(), validDays: Number(release.validDays) } })
+            }}
+          >
+            <Field label="Motivo (problema da Sogester)">
+              <textarea value={release.reason} onChange={(e) => setRelease({ ...release, reason: e.target.value })} minLength={10} maxLength={500} rows={3} required />
+            </Field>
+            <Field label="Validade da autorização">
+              <select value={release.validDays} onChange={(e) => setRelease({ ...release, validDays: e.target.value })}>
+                {[1, 2, 3, 5, 7, 10, 15].map((d) => (
+                  <option key={d} value={d}>
+                    {d} {d === 1 ? 'dia' : 'dias'}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <div>
+              <button className="primary">Emitir saída antecipada</button>
+            </div>
+          </form>
         </section>
       )}
 
@@ -451,13 +480,21 @@ export default function ProcessDetail() {
         <section className="card">
           <h3><Icon name="shield" /> {p.authorization.type === 'SAIDA_ANTECIPADA' ? 'Saída antecipada' : 'Autorização digital'}</h3>
           <dl className="details">
+            {row('Estado', releaseState(p.authorization))}
             {row('Código', <code>{p.authorization.code}</code>)}
-            {row('Tipo', p.authorization.type === 'SAIDA_ANTECIPADA' ? 'Saída antecipada (compromisso de pagamento)' : 'Padrão')}
+            {p.authorization.reason && row('Motivo', p.authorization.reason)}
             {row('Emitida por', `${p.authorization.issuedBy} · ${formatDate(p.authorization.issuedAt)}`)}
             {p.authorization.notes && row('Notas', p.authorization.notes)}
           </dl>
+          {p.authorization.accepted && (
+            <div className="actions-left">
+              <Link to={`/processos/${p.id}/saida-antecipada`} className="button primary">
+                <Icon name="file" /> Ver e imprimir autorização
+              </Link>
+            </div>
+          )}
           <p className="muted small">
-            Verificação pública: <Link to={`/verificar/${p.authorization.code}`}>/verificar/{p.authorization.code}</Link>
+            Verificação (QR Code): <Link to={`/verificar/${p.authorization.code}`}>/verificar/{p.authorization.code}</Link>
           </p>
         </section>
       )}
@@ -466,6 +503,11 @@ export default function ProcessDetail() {
         <section className="card">
           <h3><Icon name="card" /> Carregar proforma</h3>
           <p className="muted">Só o ficheiro é obrigatório: os outros dados já estão no documento.</p>
+          {p.authorization && !p.authorization.accepted && (
+            <p className="notice">
+              <Icon name="alert" /> A saída antecipada aguarda o aceite do transitário: aguarde ou revogue-a antes de enviar a proforma.
+            </p>
+          )}
           <form
             className="stack"
             onSubmit={(e) => {
@@ -490,6 +532,11 @@ export default function ProcessDetail() {
                 <input value={proforma.paymentReference} onChange={(e) => setProforma({ ...proforma, paymentReference: e.target.value })} />
               </Field>
             </div>
+            {p.authorization?.accepted && (
+              <Field label="Data limite de pagamento (saída antecipada)">
+                <input type="date" value={proforma.dueDate} min={new Date().toISOString().slice(0, 10)} onChange={(e) => setProforma({ ...proforma, dueDate: e.target.value })} required />
+              </Field>
+            )}
             <Field label="Ficheiro da proforma (PDF ou imagem)">
               <input type="file" accept="application/pdf,image/png,image/jpeg" onChange={(e) => setProforma({ ...proforma, file: e.target.files[0] })} required />
             </Field>

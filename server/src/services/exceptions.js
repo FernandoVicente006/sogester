@@ -11,7 +11,7 @@ const AFTER_APPROVAL = ['EM_PROCESSAMENTO_INTERNO', 'PAGAMENTO_PENDENTE', 'PAGAM
 const PAID = ['PAGAMENTO_CONFIRMADO', 'CONCLUIDO'];
 
 const activeAuthorization = (processId) =>
-  queryOne('SELECT id, type FROM authorizations WHERE process_id = ? AND revoked_at IS NULL', [processId]);
+  queryOne('SELECT id, type, used_at AS usedAt FROM authorizations WHERE process_id = ? AND revoked_at IS NULL', [processId]);
 
 /** Saída antecipada: a carga pode já ter saído contra o compromisso de pagamento, por isso a dívida não se apaga. */
 async function assertNotEarlyRelease(processId) {
@@ -63,6 +63,7 @@ export async function revokeAuthorization(actor, id, { reason }) {
   }
   const auth = await activeAuthorization(id);
   if (!auth) throw conflict('Não há autorização ativa', 'NO_AUTHORIZATION');
+  if (auth.usedAt) throw conflict('A carga já saiu com esta autorização: já não pode ser revogada', 'EARLY_RELEASE_BINDING');
 
   await withTransaction(async (conn) => {
     await conn.query('UPDATE authorizations SET revoked_at = NOW(), revoked_by = ?, revoke_reason = ? WHERE id = ?', [actor.id, reason, auth.id]);

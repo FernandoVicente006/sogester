@@ -44,22 +44,33 @@ const EVENTS = {
     body: (_p, notes) => notes || 'O processo foi rejeitado.',
   },
   COMMITMENT_SIGNED: {
-    staff: [ADMIN_ENTIDADE, CHEFE_COMERCIAL],
-    title: (p) => `Compromisso de pagamento assinado — ${p.reference}`,
-    body: (p) => `${p.forwarderName} assinou o compromisso: pode emitir a autorização de saída antecipada.`,
+    staff: [ADMIN_ENTIDADE, CHEFE_COMERCIAL, LOJA],
+    title: (p) => `Compromisso aceite — ${p.reference}`,
+    body: (p) => `${p.forwarderName} aceitou o compromisso: a autorização de saída antecipada está pronta a imprimir.`,
   },
   AUTHORIZATION_ISSUED: {
     forwarder: true,
     staff: [LOJA, FINANCAS],
-    title: (p) => `Saída antecipada emitida — ${p.reference}`,
-    body: () => 'A Sogester autorizou a saída antecipada da carga.',
+    title: (p) => `Saída antecipada autorizada — ${p.reference}`,
+    body: (_p, notes, audience) =>
+      audience === 'staff'
+        ? `Motivo: ${notes}`
+        : `Motivo: ${notes}. Aceite o compromisso de pagamento no processo para poder imprimir a autorização.`,
+  },
+  AUTHORIZATION_USED: {
+    forwarder: true,
+    staff: [ADMIN_ENTIDADE, CHEFE_COMERCIAL, FINANCAS],
+    title: (p) => `Carga saiu pela portaria — ${p.reference}`,
+    body: () => 'A saída antecipada foi usada na portaria. O pagamento continua pendente até à data limite.',
   },
   PROFORMA_ISSUED: {
     forwarder: true,
     staff: [FINANCAS],
     title: (p, audience) => (audience === 'staff' ? `Pagamento pendente — ${p.reference}` : `Proforma disponível — ${p.reference}`),
-    body: (_p, _n, audience) =>
-      audience === 'staff' ? 'A proforma foi enviada ao transitário: aguarda o pagamento.' : 'Efetue o pagamento e carregue o comprovativo no processo.',
+    body: (_p, notes, audience) =>
+      [audience === 'staff' ? 'A proforma foi enviada ao transitário: aguarda o pagamento.' : 'Efetue o pagamento e carregue o comprovativo no processo.', notes]
+        .filter(Boolean)
+        .join(' '),
   },
   PAYMENT_PROOF_SUBMITTED: {
     staff: [FINANCAS, ADMIN_ENTIDADE],
@@ -109,16 +120,16 @@ const EVENTS = {
   PAYMENT_DUE_SOON: {
     forwarder: true,
     title: (p) => `O prazo de pagamento de ${p.reference} termina em breve`,
-    body: () => 'Liquide a proforma nas próximas 24 horas para manter novos compromissos disponíveis.',
+    body: () => 'Liquide a proforma nas próximas 24 horas para evitar o incumprimento e a multa.',
   },
   PAYMENT_OVERDUE: {
     forwarder: true,
-    staff: [FINANCAS, ADMIN_ENTIDADE],
-    title: (p, audience) => (audience === 'staff' ? `Pagamento em atraso — ${p.reference}` : `Prazo de pagamento ultrapassado — ${p.reference}`),
+    staff: [FINANCAS, ADMIN_ENTIDADE, CHEFE_COMERCIAL],
+    title: (p) => `Processo em incumprimento — ${p.reference}`,
     body: (p, _n, audience) =>
       audience === 'staff'
-        ? `${p.forwarderName} não liquidou a carga libertada com compromisso de pagamento.`
-        : 'O prazo terminou. Novos compromissos ficam bloqueados até liquidar.',
+        ? `${p.forwarderName} não liquidou no prazo a carga que saiu antecipadamente. A Sogester pode aplicar multa.`
+        : 'O prazo terminou: o processo está em incumprimento e a Sogester pode aplicar multa e recorrer às vias legais.',
   },
 };
 

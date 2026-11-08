@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { pool, query, queryOne, withTransaction } from '../db/pool.js';
 import { badRequest, conflict, notFound } from '../errors.js';
+import { ROLES } from '../roles.js';
 import { audit } from './audit.js';
 import { markMessageNotificationsRead, notifyMessage } from './notifications.js';
 import { documentsDir, loadAccessible, scopeClause } from './processes.js';
@@ -108,6 +109,7 @@ export async function getAttachmentFile(actor, processId, messageId, attachmentI
 
 /** Total de mensagens por ler em todos os processos que o ator vê (selo na navegação). */
 export async function unreadTotal(actor) {
+  if (actor.role === ROLES.PORTARIA) return 0; // a Portaria não participa nas conversas
   const scope = scopeClause(actor);
   const row = await queryOne(
     `SELECT COUNT(*) AS n

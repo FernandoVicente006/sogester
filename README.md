@@ -9,7 +9,7 @@ Camada digital entre transitários e a Sogester (terminais de Cabinda, Soyo e Lu
 - Passo 2: submissão de processos (cliente, carga, documentos), fila por prioridade, análise pela Loja
   (SUBMETIDO → EM_ANALISE → DOCUMENTOS_PENDENTES/REJEITADO) e histórico de estados.
 - Passo 3: autorização digital (código assinado com HMAC, verificável em `/verificar/:código`), compromisso de
-  pagamento para perecíveis (saída antecipada) e faturação manual: proforma → comprovativo → confirmação → fatura
+  pagamento (saída antecipada) e faturação manual: proforma → comprovativo → confirmação → fatura
   recibo.
 - Passo 4: chat por processo (Sogester ↔ transitário) com texto e anexos (PDF/PNG/JPG, até 3 por mensagem),
   visualizador embutido, mensagens não lidas por utilizador e conversa só de leitura em processos encerrados.
@@ -45,10 +45,12 @@ proforma gerada no sistema de faturação da Sogester; o transitário envia o co
 e carregam a fatura recibo, e o processo conclui-se sozinho. As Finanças têm fila própria e comparam o comprovativo com a
 proforma lado a lado; o transitário vê e descarrega os documentos e só avança com o comprovativo («Já paguei»). A plataforma não emite documentos fiscais: guarda e entrega
 os ficheiros, e só o ficheiro é obrigatório (número, valor, entidade e referência são opcionais; proformas sem valor
-ficam fora dos totais de receita). A saída antecipada é uma exceção paralela: não muda o estado do processo, é emitida
-pelo administrador ou pelo Chefe comercial, exige compromisso assinado (palavra-passe) e o prazo
-(`PAYMENT_COMMITMENT_DAYS`, 3 por omissão) conta a partir da emissão; compromissos em atraso bloqueiam novos compromissos
-do mesmo transitário. Pressuposto a confirmar com a Sogester: a ordem da fila.
+ficam fora dos totais de receita). A saída antecipada é uma exceção para problemas da Sogester que impedem a saída da carga: não muda o
+estado do processo; o administrador ou o Chefe comercial emite-a com motivo e validade; o transitário aceita o compromisso
+de pagamento (palavra-passe, texto a rever pelo jurídico) e só então a imprime, com QR Code; a Portaria (perfil que só
+verifica autorizações) confere a carga e regista a saída, que vale uma única vez. Ao carregar a proforma, a Sogester fixa
+a data limite de pagamento; passado o prazo, o processo fica em incumprimento, os responsáveis são avisados e o
+transitário não aceita novos compromissos até liquidar. Pressuposto a confirmar com a Sogester: a ordem da fila.
 
 Fila (staff): urgência pedida → prioridade da carga (perecível, perigosa, descarga direta, restantes) → chegada.
 Esta ordem é um pressuposto a confirmar com a Sogester (ver "Pontos em aberto" no Notion).
