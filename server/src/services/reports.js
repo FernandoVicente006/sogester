@@ -1,5 +1,5 @@
 import { query } from '../db/pool.js';
-import { badRequest } from '../errors.js';
+import { badRequest, forbidden } from '../errors.js';
 import { CARGO_PRIORITIES, VOLUME_TYPES } from '../cargo.js';
 import { isSuperAdmin } from '../roles.js';
 import { audit } from './audit.js';
@@ -280,8 +280,130 @@ const stalledColumns = [
   { label: 'Horas à espera', value: (r) => r.hoursWaiting },
 ];
 
+// ---- comparação entre terminais (só o administrador geral) ------------------------------------
+const moneyText = (list) => list.map((m) => `${m.currency} ${m.amount.toFixed(2).replace('.', ',')}`).join(' + ');
+
+/**
+ * Uma linha por terminal com processos, tempos, receita, atrasos, saídas antecipadas, equipa e transitários,
+ * para comparar todas as entidades no mesmo período. Reutiliza os outros relatórios sem filtro de terminal.
+ */
+export async function terminalsReport(actor, filters) {
+  if (!isSuperAdmin(actor)) throw forbidden('Só o administrador geral compara terminais');
+  const period = resolvePeriod(filters);
+  const all = { from: period.from, to: period.to };
+  const [entities, staff, approved, early, procs, revenue, overdue] = await Promise.all([
+    query('SELECT id, code, name, active FROM entities ORDER BY name'),
+    query("SELECT entity_id AS entityId, COUNT(*) AS n FROM users WHERE entity_id IS NOT NULL AND active = 1 GROUP BY entity_id"),
+    query("SELECT entity_id AS entityId, COUNT(*) AS n FROM forwarder_entities WHERE status = 'APROVADO' GROUP BY entity_id"),
+    query(
+      `SELECT p.entity_id AS entityId, COUNT(*) AS issued, SUM(a.used_at IS NOT NULL) AS used, SUM(a.revoked_at IS NOT NULL) AS revoked
+         FROM authorizations a JOIN processes p ON p.id = a.process_id
+        WHERE a.type = 'SAIDA_ANTECIPADA' AND ${periodSql('a.issued_at')}
+        GROUP BY p.entity_id`,
+      [period.from, period.to],
+    ),
+    processesReport(actor, all),
+    revenueReport(actor, all),
+    overdueReport(actor, { minHours: filters.minHours ?? 24 }),
+  ]);
+  const byId = (rows) => new Map(rows.map((r) => [r.entityId, r]));
+  const staffBy = byId(staff);
+  const approvedBy = byId(approved);
+  const earlyBy = byId(early);
+
+  const from = new Date(`${period.from}T00:00:00`);
+  const to = new Date(`${period.to}T23:59:59`);
+  const inRange = (d) => d && new Date(d) >= from && new Date(d) <= to;
+  const sumBy = (rows, pick) => {
+    const out = {};
+    for (const r of rows) {
+      const v = pick(r);
+      if (v !== null && r.amount !== null) out[r.currency] = (out[r.currency] ?? 0) + r.amount;
+    }
+    return Object.entries(out).map(([currency, amount]) => ({ currency, amount: round(amount, 2) }));
+  };
+
+  const terminals = entities.map((e) => {
+    const p = procs.rows.filter((r) => r.entityCode === e.code);
+    const rev = revenue.rows.filter((r) => r.entityCode === e.code);
+    const late = overdue.payments.rows.filter((r) => r.entityCode === e.code);
+    const stalled = overdue.stalled.rows.filter((r) => r.entityCode === e.code);
+    const er = earlyBy.get(e.id);
+    return {
+      entityId: e.id,
+      code: e.code,
+      name: e.name,
+      active: !!e.active,
+      staff: Number(staffBy.get(e.id)?.n ?? 0),
+      forwarders: Number(approvedBy.get(e.id)?.n ?? 0),
+      processes: p.length,
+      inProgress: p.filter((r) => !CLOSED.includes(r.status)).length,
+      completed: p.filter((r) => r.status === 'CONCLUIDO').length,
+      rejected: p.filter((r) => r.status === 'REJEITADO').length,
+      cancelled: p.filter((r) => r.status === 'CANCELADO').length,
+      urgent: p.filter((r) => r.urgent).length,
+      avgHoursToApproval: avg(p.map((r) => r.hoursToApproval).filter((h) => h !== null)),
+      avgHoursToComplete: avg(p.map((r) => r.hoursToComplete).filter((h) => h !== null)),
+      invoiced: sumBy(rev, (r) => (inRange(r.proformaIssuedAt) ? r : null)),
+      collected: sumBy(rev, (r) => (inRange(r.paymentConfirmedAt) ? r : null)),
+      outstanding: sumBy(rev, (r) => (inRange(r.proformaIssuedAt) && !r.paymentConfirmedAt ? r : null)),
+      overduePayments: late.length,
+      stalled: stalled.length,
+      earlyReleases: Number(er?.issued ?? 0),
+      earlyReleasesUsed: Number(er?.used ?? 0),
+      earlyReleasesRevoked: Number(er?.revoked ?? 0),
+    };
+  });
+
+  const sum = (k) => terminals.reduce((s, t) => s + t[k], 0);
+  const merge = (k) => {
+    const out = {};
+    for (const t of terminals) for (const m of t[k]) out[m.currency] = round((out[m.currency] ?? 0) + m.amount, 2);
+    return Object.entries(out).map(([currency, amount]) => ({ currency, amount }));
+  };
+  const totals = {
+    terminals: terminals.length,
+    activeTerminals: terminals.filter((t) => t.active).length,
+    ...Object.fromEntries(
+      ['staff', 'processes', 'inProgress', 'completed', 'rejected', 'cancelled', 'urgent', 'overduePayments', 'stalled', 'earlyReleases', 'earlyReleasesUsed'].map((k) => [k, sum(k)]),
+    ),
+    avgHoursToApproval: procs.summary.avgHoursToApproval,
+    avgHoursToComplete: procs.summary.avgHoursToComplete,
+    invoiced: merge('invoiced'),
+    collected: merge('collected'),
+    outstanding: merge('outstanding'),
+    withoutAmount: revenue.withoutAmount,
+  };
+  return { period, minHours: overdue.minHours, totals, rows: terminals, truncated: procs.truncated || revenue.truncated };
+}
+
+const terminalColumns = [
+  { label: 'Terminal', value: (r) => r.name },
+  { label: 'Código', value: (r) => r.code },
+  { label: 'Ativo', value: (r) => r.active },
+  { label: 'Equipa ativa', value: (r) => r.staff },
+  { label: 'Transitários aprovados', value: (r) => r.forwarders },
+  { label: 'Processos no período', value: (r) => r.processes },
+  { label: 'Em curso', value: (r) => r.inProgress },
+  { label: 'Concluídos', value: (r) => r.completed },
+  { label: 'Rejeitados', value: (r) => r.rejected },
+  { label: 'Cancelados', value: (r) => r.cancelled },
+  { label: 'Com urgência', value: (r) => r.urgent },
+  { label: 'Horas médias até conformidade', value: (r) => r.avgHoursToApproval },
+  { label: 'Horas médias até conclusão', value: (r) => r.avgHoursToComplete },
+  { label: 'Faturado', value: (r) => moneyText(r.invoiced) },
+  { label: 'Cobrado', value: (r) => moneyText(r.collected) },
+  { label: 'Em aberto', value: (r) => moneyText(r.outstanding) },
+  { label: 'Pagamentos em atraso', value: (r) => r.overduePayments },
+  { label: 'Processos parados', value: (r) => r.stalled },
+  { label: 'Saídas antecipadas', value: (r) => r.earlyReleases },
+  { label: 'Saídas antecipadas usadas', value: (r) => r.earlyReleasesUsed },
+  { label: 'Saídas antecipadas revogadas', value: (r) => r.earlyReleasesRevoked },
+];
+
 // ---- API -------------------------------------------------------------------------------------
 export const REPORTS = {
+  terminals: { run: terminalsReport, columns: () => terminalColumns, rows: (r) => r.rows },
   processes: { run: processesReport, columns: () => processColumns, rows: (r) => r.rows },
   revenue: { run: revenueReport, columns: () => revenueColumns, rows: (r) => r.rows },
   overdue: {

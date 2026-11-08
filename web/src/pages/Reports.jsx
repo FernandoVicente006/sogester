@@ -51,8 +51,10 @@ export default function Reports() {
   const { user } = useAuth()
   const canBill = BILLING_ROLES.includes(user.role)
   const [params, setParams] = useSearchParams()
+  const isMaster = user.role === 'SUPER_ADMIN'
   const requested = params.get('tab')
-  const tab = ['processes', 'revenue', 'overdue'].includes(requested) && (canBill || requested === 'processes') ? requested : 'processes'
+  const allowed = [...(isMaster ? ['terminals'] : []), 'processes', ...(canBill ? ['revenue', 'overdue'] : [])]
+  const tab = allowed.includes(requested) ? requested : allowed[0]
 
   const [filters, setFilters] = useState({ from: daysAgo(89), to: ymd(new Date()), status: '', priority: '', forwarderId: '', entityId: '', minHours: '24' })
   const [forwarders, setForwarders] = useState([])
@@ -70,7 +72,7 @@ export default function Reports() {
   const query = useCallback(
     (extra = {}) => {
       const q = new URLSearchParams()
-      const used = tab === 'overdue' ? ['entityId', 'minHours'] : tab === 'revenue' ? ['from', 'to', 'forwarderId', 'entityId'] : ['from', 'to', 'status', 'priority', 'forwarderId', 'entityId']
+      const used = tab === 'terminals' ? ['from', 'to', 'minHours'] : tab === 'overdue' ? ['entityId', 'minHours'] : tab === 'revenue' ? ['from', 'to', 'forwarderId', 'entityId'] : ['from', 'to', 'status', 'priority', 'forwarderId', 'entityId']
       for (const k of used) if (filters[k]) q.set(k, filters[k])
       for (const [k, v] of Object.entries(extra)) q.set(k, v)
       return q.toString()
@@ -100,11 +102,12 @@ export default function Reports() {
 
   // o relatório em memória pode ser de outro separador enquanto o novo carrega
   const data = report?.forTab === tab ? report.data : null
-  const tabs = [['processes', 'Processos'], ...(canBill ? [['revenue', 'Receita'], ['overdue', 'Atrasos']] : [])]
+  const TAB_LABELS = { terminals: 'Terminais', processes: 'Processos', revenue: 'Receita', overdue: 'Atrasos' }
+  const tabs = allowed.map((k) => [k, TAB_LABELS[k]])
 
   return (
     <>
-      <PageHeader title="Relatórios" subtitle="Indicadores e exportação de dados do terminal.">
+      <PageHeader title="Relatórios" subtitle={isMaster ? 'Indicadores de todos os terminais, lado a lado ou um a um.' : 'Indicadores e exportação de dados do terminal.'}>
         <button className="no-print" onClick={() => window.print()}>
           <Icon name="printer" /> Imprimir / PDF
         </button>
@@ -135,7 +138,7 @@ export default function Reports() {
               </Field>
             </>
           )}
-          {user.role === 'SUPER_ADMIN' && (
+          {isMaster && tab !== 'terminals' && (
             <Field label="Terminal">
               <select value={filters.entityId} onChange={set('entityId')}>
                 <option value="">Todos</option>
@@ -147,7 +150,7 @@ export default function Reports() {
               </select>
             </Field>
           )}
-          {tab !== 'overdue' && (
+          {!['overdue', 'terminals'].includes(tab) && (
             <Field label="Transitário">
               <select value={filters.forwarderId} onChange={set('forwarderId')}>
                 <option value="">Todos</option>
@@ -183,7 +186,7 @@ export default function Reports() {
               </Field>
             </>
           )}
-          {tab === 'overdue' && (
+          {['overdue', 'terminals'].includes(tab) && (
             <Field label="Processo parado há mais de">
               <select value={filters.minHours} onChange={set('minHours')}>
                 {[[0, 'qualquer tempo'], [24, '24 horas'], [48, '48 horas'], [72, '3 dias'], [168, '7 dias']].map(([h, l]) => (
@@ -199,9 +202,97 @@ export default function Reports() {
 
       <ErrorBox message={error} />
       {loading && !data && <p className="muted">A carregar…</p>}
+      {data && tab === 'terminals' && <TerminalsView report={data} />}
       {data && tab === 'processes' && <ProcessesView report={data} />}
       {data && tab === 'revenue' && <RevenueView report={data} />}
       {data && tab === 'overdue' && <OverdueView report={data} onExport={(kind) => exportCsv({ kind })} />}
+    </>
+  )
+}
+
+const moneyList = (list) => (list.length ? list.map((m) => money(m.amount, m.currency)).join(' · ') : '—')
+const amountIn = (list, currency) => list.find((m) => m.currency === currency)?.amount ?? 0
+
+/** Administrador geral: todos os terminais lado a lado no mesmo período. */
+function TerminalsView({ report }) {
+  const t = report.totals
+  const rows = report.rows
+  const currencies = [...new Set(rows.flatMap((r) => [...r.invoiced, ...r.collected].map((m) => m.currency)))]
+  const currency = currencies.includes('AOA') ? 'AOA' : currencies[0] ?? 'AOA'
+  const bars = (pick) => rows.map((r) => ({ label: r.name, value: pick(r) })).sort((a, b) => b.value - a.value)
+  return (
+    <>
+      <div className="kpis">
+        <Kpi icon="building" value={`${t.activeTerminals} de ${t.terminals}`} label="Terminais ativos" />
+        <Kpi icon="clipboard" value={t.processes} label="Processos no período (todos)" />
+        <Kpi icon="check" tone="green" value={t.completed} label="Concluídos" />
+        <Kpi icon="clock" tone="amber" value={t.inProgress} label="Em curso" />
+        <Kpi icon="check" tone="green" money value={moneyList(t.collected)} label="Cobrado no período" />
+        <Kpi icon="alert" tone="red" value={t.overduePayments + t.stalled} label="Pagamentos em atraso e processos parados" />
+      </div>
+      <div className="two-col">
+        <section className="card">
+          <h3>Processos por terminal</h3>
+          <BarList items={bars((r) => r.processes)} />
+        </section>
+        <section className="card">
+          <h3>Cobrado por terminal ({currency})</h3>
+          <BarList items={bars((r) => amountIn(r.collected, currency))} tone="green" format={(v) => money(v, currency)} />
+        </section>
+      </div>
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Terminal</th>
+              <th className="num">Equipa</th>
+              <th className="num">Transitários</th>
+              <th className="num">Processos</th>
+              <th className="num">Em curso</th>
+              <th className="num">Concluídos</th>
+              <th className="num">Rejeit./cancel.</th>
+              <th className="num">Até conformidade</th>
+              <th className="num">Até concluir</th>
+              <th className="num">Faturado</th>
+              <th className="num">Cobrado</th>
+              <th className="num">Em aberto</th>
+              <th className="num">Atrasos</th>
+              <th className="num">Parados</th>
+              <th className="num">Saídas antec.</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.entityId}>
+                <td className="nowrap">
+                  <strong>{r.name}</strong> {!r.active && <span className="tag">Inativo</span>}
+                </td>
+                <td className="num">{r.staff}</td>
+                <td className="num">{r.forwarders}</td>
+                <td className="num">{r.processes}</td>
+                <td className="num">{r.inProgress}</td>
+                <td className="num">{r.completed}</td>
+                <td className="num">{r.rejected + r.cancelled}</td>
+                <td className="num">{fmtHours(r.avgHoursToApproval)}</td>
+                <td className="num">{fmtHours(r.avgHoursToComplete)}</td>
+                <td className="num">{moneyList(r.invoiced)}</td>
+                <td className="num">{moneyList(r.collected)}</td>
+                <td className="num">{moneyList(r.outstanding)}</td>
+                <td className={r.overduePayments ? 'num red-text' : 'num'}>{r.overduePayments}</td>
+                <td className={r.stalled ? 'num red-text' : 'num'}>{r.stalled}</td>
+                <td className="num">
+                  {r.earlyReleases}
+                  {r.earlyReleases > 0 && <span className="muted small"> ({r.earlyReleasesUsed} usadas)</span>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="muted small">
+        Parados: há mais de {report.minHours} h no mesmo estado. Os valores contam só as proformas com valor indicado
+        {t.withoutAmount ? ` (${t.withoutAmount} sem valor ficam de fora)` : ''}. Para ver os processos de um terminal, use os outros separadores e escolha o terminal.
+      </p>
     </>
   )
 }

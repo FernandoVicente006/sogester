@@ -388,3 +388,5 @@ input[type='file']::file-selector-button:hover { background: var(--brand-100); }
 .choice label { display: flex; align-items: center; gap: .45rem; padding: .55rem .9rem; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; font-weight: 500; color: var(--text); background: var(--surface); }
 .choice label.on { border-color: var(--brand-600); background: rgb(4 107 210 / .07); }
 .choice input { margin: 0; }
+.red-text { color: var(--danger); font-weight: 600; }
+.nowrap { white-space: nowrap; }

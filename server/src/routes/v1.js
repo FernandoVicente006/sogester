@@ -599,6 +599,7 @@ v1.post('/processes/:id/reopen', authenticate, requireRole(...EXCEPTION_ADMINS),
 
 // ---- relatórios ------------------------------------------------------------------------------
 const REPORT_ROLES = {
+  terminals: [SUPER_ADMIN],
   processes: [SUPER_ADMIN, ADMIN_ENTIDADE, LOJA, CADASTRO, FINANCAS, CHEFE_COMERCIAL],
   revenue: [SUPER_ADMIN, ADMIN_ENTIDADE, FINANCAS, CHEFE_COMERCIAL],
   overdue: [SUPER_ADMIN, ADMIN_ENTIDADE, FINANCAS, CHEFE_COMERCIAL],
@@ -618,7 +619,7 @@ const reportQuery = z.object({
 v1.get(
   '/reports/:name',
   authenticate,
-  validate({ params: z.object({ name: z.enum(['processes', 'revenue', 'overdue']) }), query: reportQuery }),
+  validate({ params: z.object({ name: z.enum(['processes', 'revenue', 'overdue', 'terminals']) }), query: reportQuery }),
   async (req, res) => {
     const { name } = req.valid.params
     if (!REPORT_ROLES[name].includes(req.user.role)) throw forbidden()
