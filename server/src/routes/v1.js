@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { config } from '../config.js';
 import { Router } from 'express';
 import multer from 'multer';
 import rateLimit from 'express-rate-limit';
@@ -23,7 +23,7 @@ import * as reports from '../services/reports.js';
 import * as setup from '../services/setup.js';
 import * as users from '../services/users.js';
 
-export const uploadsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../uploads');
+export const uploadsDir = config.uploadsDir;
 
 const { SUPER_ADMIN, ADMIN_ENTIDADE, CADASTRO, LOJA, FINANCAS, CHEFE_COMERCIAL, PORTARIA, TRANSITARIO } = ROLES;
 const STAFF_ASSIGNABLE = [ADMIN_ENTIDADE, LOJA, CADASTRO, FINANCAS, CHEFE_COMERCIAL, PORTARIA];

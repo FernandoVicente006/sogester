@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { config } from '../config.js';
 import { pool, query, queryOne, withTransaction } from '../db/pool.js';
 import { badRequest, conflict, forbidden, notFound } from '../errors.js';
 import { CARGO_PRIORITIES, DOCUMENT_KINDS, OPERATIONS, UPLOADABLE_KINDS, VOLUME_TYPES, isVehicleCategory } from '../cargo.js';
@@ -13,7 +13,7 @@ import { notifyProcessEvent } from './notifications.js';
 /** Prorrogações máximas do prazo de pagamento por compromisso. */
 export const MAX_EXTENSIONS = 2;
 
-export const documentsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../uploads/documents');
+export const documentsDir = path.join(config.uploadsDir, 'documents');
 
 /** Transições da análise pela Loja; daí em diante o processo avança com a proforma, o comprovativo e o recibo. */
 export const STAFF_TRANSITIONS = {

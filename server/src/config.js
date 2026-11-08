@@ -1,4 +1,8 @@
 import 'dotenv/config';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const serverRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 const isProd = process.env.NODE_ENV === 'production';
 
@@ -32,6 +36,8 @@ export const config = {
     from: process.env.MAIL_FROM ?? 'Sogester <no-reply@sogester.local>',
     maxAttempts: Number(process.env.MAIL_MAX_ATTEMPTS ?? 5),
   },
+  // Pasta dos ficheiros carregados (documentos e logótipos); o ensaio usa uma pasta própria.
+  uploadsDir: path.resolve(serverRoot, process.env.UPLOADS_DIR ?? 'uploads'),
   corsOrigin: process.env.CORS_ORIGIN ?? 'http://localhost:5173',
   db: {
     host: process.env.DB_HOST ?? 'localhost',

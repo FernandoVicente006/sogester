@@ -5,3 +5,4 @@ server/uploads/*
 !server/uploads/.gitkeep
 *.log
 setup-db.sql
+server/uploads-ensaio/

@@ -11,6 +11,7 @@
     "dev": "node --watch src/index.js",
     "migrate": "node src/db/migrate.js",
     "admin:reset-password": "node scripts/reset-admin-password.js",
+    "ensaio": "node scripts/start-ensaio.js",
     "test": "node --test --test-concurrency=1 test/*.test.js"
   },
   "dependencies": {
