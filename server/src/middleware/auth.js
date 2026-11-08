@@ -22,7 +22,7 @@ export async function authenticate(req, _res, next) {
 
   const row = await queryOne(
     `SELECT id, name, email, role, entity_id AS entityId, forwarder_id AS forwarderId, active,
-            email_notifications AS emailNotifications
+            email_notifications AS emailNotifications, can_manage_terminals AS canManageTerminals
        FROM users WHERE id = ?`,
     [payload.sub],
   );

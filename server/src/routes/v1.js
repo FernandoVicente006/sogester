@@ -41,8 +41,14 @@ const idParam = z.object({ id });
 const schemas = {
   login: z.object({ email, password: z.string().min(1).max(100) }),
   changePassword: z.object({ currentPassword: z.string().min(1), newPassword: password }),
-  setup: z.object({ entityCode: z.string().trim().toUpperCase().min(1).max(20), name: text(120), email, password }),
-  entityPatch: z.object({ name: text(120).optional(), active: z.boolean().optional() }),
+  setup: z.object({ name: text(120), email, password }),
+  entityCreate: z.object({
+    code: z.string().trim().toUpperCase().regex(/^[A-Z0-9_-]{2,20}$/, 'Código com 2 a 20 letras, números, - ou _'),
+    name: text(120),
+    location: text(120),
+    active: z.boolean().optional(),
+  }),
+  entityPatch: z.object({ name: text(120).optional(), location: text(120).optional(), active: z.boolean().optional() }),
   userCreate: z.object({
     name: text(120),
     email,
@@ -55,6 +61,7 @@ const schemas = {
     role: z.enum(STAFF_ASSIGNABLE).optional(),
     active: z.boolean().optional(),
     password: password.optional(),
+    canManageTerminals: z.boolean().optional(),
   }),
   forwarderCreate: z.object({
     name: text(160),
@@ -198,22 +205,29 @@ v1.post('/auth/change-password', authenticate, validate({ body: schemas.changePa
   res.status(204).end();
 });
 
-// Inicialização do administrador de cada entidade (protegida por token de setup; fecha quando não há terminais por inicializar)
+// Inicialização única: cria o super administrador e fecha o setup para sempre (protegida por token)
 v1.get('/setup/status', async (_req, res) => res.json(await setup.setupStatus()));
-v1.post('/setup/entity-admin', loginLimiter, validate({ body: schemas.setup }), async (req, res) => {
-  const user = await setup.createEntityAdmin(req.get('x-setup-token'), req.valid.body);
+v1.post('/setup/super-admin', loginLimiter, validate({ body: schemas.setup }), async (req, res) => {
+  const user = await setup.createSuperAdmin(req.get('x-setup-token'), req.valid.body);
   res.status(201).json({ user });
 });
 
-// Entidades: gestão só para super admin
+// Terminais: criar e editar só o super administrador ou quem ele designar
+const requireTerminalManager = (req, _res, next) => {
+  if (!entities.canManageTerminals(req.user)) throw forbidden();
+  next();
+};
 v1.get('/entities', authenticate, async (req, res) => {
   const all = await entities.listEntities();
-  res.json({ entities: req.user.role === SUPER_ADMIN ? all : all.filter((e) => e.id === req.user.entityId) });
+  res.json({ entities: entities.canManageTerminals(req.user) ? all : all.filter((e) => e.id === req.user.entityId) });
 });
+v1.post('/entities', authenticate, requireTerminalManager, validate({ body: schemas.entityCreate }), async (req, res) =>
+  res.status(201).json({ entity: await entities.createEntity(req.user, req.valid.body) }),
+);
 v1.patch(
   '/entities/:id',
   authenticate,
-  requireRole(SUPER_ADMIN),
+  requireTerminalManager,
   validate({ params: idParam, body: schemas.entityPatch }),
   async (req, res) => res.json({ entity: await entities.updateEntity(req.user, req.valid.params.id, req.valid.body) }),
 );

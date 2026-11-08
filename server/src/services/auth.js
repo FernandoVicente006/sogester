@@ -12,6 +12,7 @@ const publicUser = (u) => ({
   entityId: u.entityId ?? u.entity_id ?? null,
   forwarderId: u.forwarderId ?? u.forwarder_id ?? null,
   emailNotifications: !!(u.emailNotifications ?? u.email_notifications ?? 1),
+  canManageTerminals: !!(u.canManageTerminals ?? u.can_manage_terminals ?? 0),
 });
 
 export async function login(email, password) {

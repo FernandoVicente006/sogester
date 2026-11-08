@@ -55,7 +55,7 @@ export default function Login() {
         </button>
         {canInitialize && (
           <p className="muted small">
-            Primeira utilização de um terminal? <Link to="/setup">Inicializar administrador</Link>
+            Primeira instalação? <Link to="/setup">Inicializar a plataforma</Link>
           </p>
         )}
       </form>

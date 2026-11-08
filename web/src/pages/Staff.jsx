@@ -55,6 +55,7 @@ export default function Staff() {
             {user.role === 'SUPER_ADMIN' && <th>Entidade</th>}
             <th>Perfil</th>
             <th>Estado</th>
+            {user.role === 'SUPER_ADMIN' && <th>Gere terminais</th>}
           </tr>
         </thead>
         <tbody>
@@ -83,6 +84,16 @@ export default function Staff() {
                   'Ativo'
                 )}
               </td>
+              {user.role === 'SUPER_ADMIN' && (
+                <td>
+                  {u.role !== 'SUPER_ADMIN' && (
+                    <label className="check">
+                      <input type="checkbox" checked={u.canManageTerminals} onChange={(e) => patch(u, { canManageTerminals: e.target.checked })} />
+                      {u.canManageTerminals ? 'Sim' : 'Não'}
+                    </label>
+                  )}
+                </td>
+              )}
             </tr>
           ))}
         </tbody>

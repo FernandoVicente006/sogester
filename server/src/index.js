@@ -1,12 +1,10 @@
 import { config } from './config.js';
 import { createApp } from './app.js';
 import { migrate } from './db/migrate.js';
-import { seed } from './db/seed.js';
 import { mailEnabled } from './services/mailer.js';
 import { processOutbox, runPaymentChecks } from './services/notifications.js';
 
 await migrate();
-await seed();
 
 createApp().listen(config.port, () => {
   console.log(`Sogester API em http://localhost:${config.port}/api/v1`);

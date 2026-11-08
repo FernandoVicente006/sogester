@@ -9,7 +9,7 @@ process.env.APP_URL = 'https://portal.test';
 
 const { config } = await import('../src/config.js');
 const { migrate } = await import('../src/db/migrate.js');
-const { seed } = await import('../src/db/seed.js');
+const { bootstrapMaster, createEntityAdmin } = await import('./bootstrap.js');
 const { createApp } = await import('../src/app.js');
 const { pool } = await import('../src/db/pool.js');
 const { setMailTransport } = await import('../src/services/mailer.js');
@@ -69,7 +69,6 @@ before(async () => {
   await root.query(`DROP DATABASE IF EXISTS \`${database}\``);
   await root.end();
   await migrate({ log: () => {} });
-  await seed({ log: () => {} });
   setMailTransport(async (m) => {
     if (failNext > 0) {
       failNext--;
@@ -88,11 +87,9 @@ after(async () => {
 });
 
 test('notificações: destinatários, e-mail, preferências, chat e prazos', async () => {
+  const superToken = await bootstrapMaster(base);
   // --- preparação
-  await api('POST', '/setup/entity-admin', {
-    body: { entityCode: 'CABINDA', name: 'Diretor', email: 'dir@cabinda.ao', password: 'Senha1234' },
-    headers: { 'x-setup-token': 'test-setup-token' },
-  });
+  await createEntityAdmin(base, superToken, { entityCode: 'CABINDA', name: 'Diretor', email: 'dir@cabinda.ao', password: 'Senha1234' });
   const admin = await login('dir@cabinda.ao', 'Senha1234');
   for (const [name, role] of [['Loja', 'LOJA'], ['Fat', 'FINANCAS']]) {
     await api('POST', '/users', { token: admin, body: { name, email: `${role.toLowerCase()}@cabinda.ao`, password: 'Senha1234', role } });
@@ -111,12 +108,8 @@ test('notificações: destinatários, e-mail, preferências, chat e prazos', asy
   const fwdA = await mkForwarder(1);
   const fwdB = await mkForwarder(2);
 
-  const superToken = await login(config.seed.superAdminEmail, config.seed.superAdminPassword);
   await api('PATCH', '/entities/2', { token: superToken, body: { active: true } });
-  await api('POST', '/setup/entity-admin', {
-    body: { entityCode: 'SOYO', name: 'Diretor Soyo', email: 'dir@soyo.ao', password: 'Senha1234' },
-    headers: { 'x-setup-token': 'test-setup-token' },
-  });
+  await createEntityAdmin(base, superToken, { entityCode: 'SOYO', name: 'Diretor Soyo', email: 'dir@soyo.ao', password: 'Senha1234' });
   const soyo = await login('dir@soyo.ao', 'Senha1234');
 
   const inbox = async (token, query = '') => (await api('GET', `/notifications${query}`, { token })).body;

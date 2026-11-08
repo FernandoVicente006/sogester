@@ -8,7 +8,7 @@ process.env.SETUP_TOKEN = 'test-setup-token';
 
 const { config } = await import('../src/config.js');
 const { migrate } = await import('../src/db/migrate.js');
-const { seed } = await import('../src/db/seed.js');
+const { bootstrapMaster, createEntityAdmin } = await import('./bootstrap.js');
 const { createApp } = await import('../src/app.js');
 const { pool } = await import('../src/db/pool.js');
 
@@ -37,7 +37,6 @@ before(async () => {
   await root.query(`DROP DATABASE IF EXISTS \`${database}\``);
   await root.end();
   await migrate({ log: () => {} });
-  await seed({ log: () => {} });
   server = createApp().listen(0);
   base = `http://localhost:${server.address().port}`;
 });
@@ -48,29 +47,28 @@ after(async () => {
 });
 
 test('fluxo completo: entidades, perfis e transitários', async () => {
-  // --- setup do admin de Cabinda
-  const noToken = await api('POST', '/setup/entity-admin', {
-    body: { entityCode: 'CABINDA', name: 'Diretor', email: 'dir@cabinda.ao', password: 'Senha1234' },
-  });
-  assert.equal(noToken.status, 403);
+  // --- inicialização única: cria o super administrador e fecha para sempre
+  assert.deepEqual((await api('GET', '/setup/status')).body, { available: true });
+  const master = { name: 'Administrador Geral', email: 'master@sogester.test', password: 'Master12345' };
+  const withToken = { 'x-setup-token': 'test-setup-token' };
+  assert.equal((await api('POST', '/setup/super-admin', { body: master })).status, 403, 'sem token');
+  assert.equal((await api('POST', '/setup/super-admin', { body: master, headers: { 'x-setup-token': 'errado' } })).status, 403);
+  const initialized = await api('POST', '/setup/super-admin', { body: master, headers: withToken });
+  assert.equal(initialized.status, 201);
+  assert.equal(initialized.body.user.role, 'SUPER_ADMIN');
+  assert.deepEqual((await api('GET', '/setup/status')).body, { available: false });
+  const second = await api('POST', '/setup/super-admin', { body: { ...master, email: 'outro@sogester.test' }, headers: withToken });
+  assert.equal(second.body.error.code, 'SETUP_CLOSED', 'o setup não volta a abrir');
+  assert.equal((await api('POST', '/setup/entity-admin', { body: {}, headers: withToken })).status, 404, 'não há inicialização por terminal');
+  const superToken = await login(master.email, master.password);
 
-  const setupBody = { entityCode: 'cabinda', name: 'Diretor', email: 'dir@cabinda.ao', password: 'Senha1234' };
-  const setup = await api('POST', '/setup/entity-admin', { body: setupBody, headers: { 'x-setup-token': 'test-setup-token' } });
+  // --- o super administrador cria o administrador de Cabinda
+  const setup = await api('POST', '/users', {
+    token: superToken,
+    body: { name: 'Diretor', email: 'dir@cabinda.ao', password: 'Senha1234', role: 'ADMIN_ENTIDADE', entityId: 1 },
+  });
   assert.equal(setup.status, 201);
   assert.equal(setup.body.user.role, 'ADMIN_ENTIDADE');
-  assert.deepEqual((await api('GET', '/setup/status')).body, { available: false, entities: [] }, 'terminal ocupado deixa de aparecer');
-
-  const again = await api('POST', '/setup/entity-admin', {
-    body: { ...setupBody, email: 'outro@cabinda.ao' },
-    headers: { 'x-setup-token': 'test-setup-token' },
-  });
-  assert.equal(again.status, 409);
-
-  const soyoInactive = await api('POST', '/setup/entity-admin', {
-    body: { ...setupBody, entityCode: 'SOYO', email: 'dir@soyo.ao' },
-    headers: { 'x-setup-token': 'test-setup-token' },
-  });
-  assert.equal(soyoInactive.status, 409);
 
   // --- login
   assert.equal((await api('POST', '/auth/login', { body: { email: 'dir@cabinda.ao', password: 'errada123' } })).status, 401);
@@ -139,19 +137,11 @@ test('fluxo completo: entidades, perfis e transitários', async () => {
   assert.equal(approved.body.forwarder.entities[0].status, 'APROVADO');
 
   // --- isolamento por entidade: ativar Soyo e criar admin
-  const superToken = await login(config.seed.superAdminEmail, config.seed.superAdminPassword);
   assert.equal((await api('PATCH', '/entities/2', { token: superToken, body: { active: true } })).status, 200);
   assert.equal((await api('PATCH', '/entities/2', { token: adminToken, body: { active: false } })).status, 403);
 
-  const open = (await api('GET', '/setup/status')).body;
-  assert.equal(open.available, true);
-  assert.deepEqual(open.entities.map((e) => e.code), ['SOYO'], 'só terminais ativos e sem administrador');
-  await api('POST', '/setup/entity-admin', {
-    body: { entityCode: 'SOYO', name: 'Diretor Soyo', email: 'dir@soyo.ao', password: 'Senha1234' },
-    headers: { 'x-setup-token': 'test-setup-token' },
-  });
+  await createEntityAdmin(base, superToken, { entityCode: 'SOYO', name: 'Diretor Soyo', email: 'dir@soyo.ao', password: 'Senha1234' });
   const soyoToken = await login('dir@soyo.ao', 'Senha1234');
-  assert.equal((await api('GET', '/setup/status')).body.available, false);
 
   assert.equal((await api('GET', `/forwarders/${fwd.id}`, { token: soyoToken })).status, 404);
   assert.deepEqual((await api('GET', '/forwarders', { token: soyoToken })).body.forwarders, []);
@@ -176,6 +166,29 @@ test('fluxo completo: entidades, perfis e transitários', async () => {
   const edit = await api('PATCH', `/forwarders/${fwd.id}`, { token: fwdToken, body: { phone: '923000000' } });
   assert.equal(edit.body.forwarder.phone, '923000000');
   assert.equal((await api('PATCH', `/forwarders/${fwd.id}`, { token: fwdToken, body: { active: false } })).status, 403);
+
+  // --- terminais: só o super administrador ou quem ele designar
+  const lobito = { code: 'lobito', name: 'Sogester Lobito', location: 'Lobito' };
+  assert.equal((await api('POST', '/entities', { token: adminToken, body: lobito })).status, 403);
+  const newTerminal = await api('POST', '/entities', { token: superToken, body: lobito });
+  assert.equal(newTerminal.status, 201);
+  assert.deepEqual([newTerminal.body.entity.code, newTerminal.body.entity.active], ['LOBITO', false], 'nasce inativo');
+  assert.equal((await api('POST', '/entities', { token: superToken, body: lobito })).body.error.code, 'ENTITY_CODE_TAKEN');
+  assert.equal((await api('POST', '/entities', { token: superToken, body: { ...lobito, code: 'x' } })).status, 400);
+
+  const soyoAdmin = (await api('GET', '/auth/me', { token: soyoToken })).body.user;
+  assert.equal(soyoAdmin.canManageTerminals, false);
+  assert.equal((await api('PATCH', `/users/${cadastro.body.user.id}`, { token: adminToken, body: { canManageTerminals: true } })).status, 403, 'só o super administrador delega');
+  const carlosId = (await api('GET', '/auth/me', { token: await login('carlos@sonacargos.ao', 'Senha1234') })).body.user.id;
+  assert.equal((await api('PATCH', `/users/${carlosId}`, { token: superToken, body: { canManageTerminals: true } })).body.error.code, 'NOT_STAFF', 'transitários não gerem terminais');
+  assert.equal((await api('PATCH', `/users/${soyoAdmin.id}`, { token: superToken, body: { canManageTerminals: true } })).body.user.canManageTerminals, true);
+  assert.equal((await api('GET', '/entities', { token: soyoToken })).body.entities.length, 4, 'quem gere terminais vê todos');
+  const namibe = await api('POST', '/entities', { token: soyoToken, body: { code: 'NAMIBE', name: 'Sogester Namibe', location: 'Namibe' } });
+  assert.equal(namibe.status, 201);
+  assert.equal((await api('PATCH', `/entities/${newTerminal.body.entity.id}`, { token: soyoToken, body: { active: true } })).body.entity.active, true);
+  await api('PATCH', `/users/${soyoAdmin.id}`, { token: superToken, body: { canManageTerminals: false } });
+  assert.equal((await api('POST', '/entities', { token: soyoToken, body: { code: 'BENGUELA', name: 'Sogester Benguela', location: 'Benguela' } })).status, 403, 'delegação retirada');
+  assert.equal((await api('GET', '/entities', { token: soyoToken })).body.entities.length, 1);
 
   // conta desativada perde acesso imediatamente
   assert.equal((await api('PATCH', `/users/${cadastro.body.user.id}`, { token: adminToken, body: { active: false } })).status, 200);

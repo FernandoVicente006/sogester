@@ -77,9 +77,9 @@ export default function Layout() {
               <Icon name="users" /> Funcionários
             </NavLink>
           )}
-          {user.role === 'SUPER_ADMIN' && (
+          {(user.role === 'SUPER_ADMIN' || user.canManageTerminals) && (
             <NavLink to="/entidades">
-              <Icon name="building" /> Entidades
+              <Icon name="building" /> Terminais
             </NavLink>
           )}
         </nav>

@@ -18,11 +18,12 @@ import Reports from './pages/Reports.jsx'
 /** Página inicial: a fila de processos (cada perfil já vê só o que lhe cabe). */
 const Home = () => <Navigate to="/painel" replace />
 
-function Protected({ roles, children }) {
+function Protected({ roles, allow, children }) {
   const { user, loading } = useAuth()
   if (loading) return <p className="center muted">A carregar…</p>
   if (!user) return <Navigate to="/login" replace />
   if (roles && !roles.includes(user.role)) return <Navigate to="/" replace />
+  if (allow && !allow(user)) return <Navigate to="/" replace />
   return children
 }
 
@@ -73,7 +74,7 @@ export default function App() {
         <Route
           path="entidades"
           element={
-            <Protected roles={['SUPER_ADMIN']}>
+            <Protected allow={(u) => u.role === 'SUPER_ADMIN' || u.canManageTerminals}>
               <Entities />
             </Protected>
           }

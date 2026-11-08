@@ -4,21 +4,18 @@ import { api, errorText } from '../api.js'
 import AuthShell from '../components/AuthShell.jsx'
 import { ErrorBox, Field } from '../components/ui.jsx'
 
-/** Inicialização do administrador (diretor-geral): escolhe o terminal, que fica vinculado em definitivo. */
+/** Inicialização única da plataforma: cria o super administrador da Sogester e fecha para sempre. */
 export default function Setup() {
   const navigate = useNavigate()
-  const [status, setStatus] = useState(null) // { available, entities }
-  const [form, setForm] = useState({ entityCode: '', name: '', email: '', password: '', setupToken: '' })
+  const [status, setStatus] = useState(null) // { available }
+  const [form, setForm] = useState({ name: '', email: '', password: '', setupToken: '' })
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }))
 
   useEffect(() => {
     api('GET', '/setup/status')
-      .then((r) => {
-        setStatus(r)
-        setForm((f) => ({ ...f, entityCode: r.entities[0]?.code ?? '' }))
-      })
+      .then(setStatus)
       .catch((err) => setError(errorText(err)))
   }, [])
 
@@ -28,7 +25,7 @@ export default function Setup() {
     setError('')
     try {
       const { setupToken, ...body } = form
-      await api('POST', '/setup/entity-admin', { body, headers: { 'X-Setup-Token': setupToken } })
+      await api('POST', '/setup/super-admin', { body, headers: { 'X-Setup-Token': setupToken } })
       navigate('/login')
     } catch (err) {
       setError(errorText(err))
@@ -42,8 +39,11 @@ export default function Setup() {
       <AuthShell>
         <div className="auth">
           <div>
-            <h1>Inicialização concluída</h1>
-            <p className="muted">Todos os terminais já têm administrador. Novos acessos são criados dentro da plataforma.</p>
+            <h1>Plataforma inicializada</h1>
+            <p className="muted">
+              A inicialização já foi feita e não volta a abrir. Os terminais e os acessos são criados dentro da plataforma
+              pelo administrador geral.
+            </p>
           </div>
           <p className="muted small">
             <Link to="/login">Voltar ao início de sessão</Link>
@@ -55,42 +55,33 @@ export default function Setup() {
 
   return (
     <AuthShell>
-    <form className="auth" onSubmit={submit}>
-      <div>
-        <h1>Inicializar terminal</h1>
-        <p className="muted">
-          O administrador fica vinculado em definitivo ao terminal escolhido e não poderá ver dados de outras entidades.
+      <form className="auth" onSubmit={submit}>
+        <div>
+          <h1>Inicializar a plataforma</h1>
+          <p className="muted">
+            Cria o administrador geral da Sogester. Só pode ser feito uma vez: depois disso esta página fecha para sempre.
+          </p>
+        </div>
+        <Field label="Nome">
+          <input value={form.name} onChange={set('name')} required />
+        </Field>
+        <Field label="E-mail">
+          <input type="email" value={form.email} onChange={set('email')} autoComplete="username" required />
+        </Field>
+        <Field label="Palavra-passe (mín. 8)">
+          <input type="password" value={form.password} onChange={set('password')} minLength={8} autoComplete="new-password" required />
+        </Field>
+        <Field label="Token de inicialização">
+          <input type="password" value={form.setupToken} onChange={set('setupToken')} required />
+        </Field>
+        <ErrorBox message={error} />
+        <button className="primary" disabled={busy || !status}>
+          {busy ? 'A criar…' : 'Criar administrador geral'}
+        </button>
+        <p className="muted small">
+          <Link to="/login">Voltar ao início de sessão</Link>
         </p>
-      </div>
-      <Field label="Terminal">
-        <select value={form.entityCode} onChange={set('entityCode')} required>
-          {status?.entities.map((en) => (
-            <option key={en.id} value={en.code}>
-              {en.name}
-            </option>
-          ))}
-        </select>
-      </Field>
-      <Field label="Nome (diretor-geral)">
-        <input value={form.name} onChange={set('name')} required />
-      </Field>
-      <Field label="E-mail">
-        <input type="email" value={form.email} onChange={set('email')} required />
-      </Field>
-      <Field label="Palavra-passe (mín. 8)">
-        <input type="password" value={form.password} onChange={set('password')} minLength={8} required />
-      </Field>
-      <Field label="Token de inicialização">
-        <input type="password" value={form.setupToken} onChange={set('setupToken')} required />
-      </Field>
-      <ErrorBox message={error} />
-      <button className="primary" disabled={busy}>
-        {busy ? 'A criar…' : 'Criar administrador'}
-      </button>
-      <p className="muted small">
-        <Link to="/login">Voltar ao início de sessão</Link>
-      </p>
-    </form>
+      </form>
     </AuthShell>
   )
 }

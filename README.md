@@ -54,9 +54,12 @@ Esta ordem é um pressuposto a confirmar com a Sogester (ver "Pontos em aberto" 
 
 ## Fluxo de inicialização
 
-1. Super admin (`SEED_SUPERADMIN_*`) ativa as entidades (só Cabinda vem ativa).
-2. Em `/setup`, o diretor-geral cria o seu acesso com o `SETUP_TOKEN`; fica vinculado ao terminal escolhido. Só aparecem
-   terminais ativos sem administrador; sem nenhum, a opção desaparece do início de sessão e o `/setup` fica fechado.
+1. Inicialização única: em `/setup`, com o `SETUP_TOKEN` do `.env`, cria-se o administrador geral da Sogester.
+   A partir daí o `/setup` fecha para sempre (fica registado na base de dados) e o token deve ser apagado do `.env`.
+   Nenhuma palavra-passe fica no código: as dos utilizadores ficam só na base, cifradas com bcrypt, e os segredos do
+   servidor (`JWT_SECRET`, `AUTHORIZATION_SECRET`, base de dados, SMTP) só no `.env` do servidor, fora do git.
+2. O administrador geral cria os terminais (nascem inativos), os ativa e cria o administrador de cada terminal em
+   Funcionários. Pode delegar a gestão de terminais a um funcionário ("Gere terminais").
 3. O administrador da entidade cria funcionários (Loja, Cadastro, Finanças de processos, Chefe comercial, Portaria) e o Cadastro regista transitários.
 4. Cada entidade aprova/rejeita o transitário separadamente; um transitário pode operar em vários terminais.
 

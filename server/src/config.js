@@ -2,8 +2,9 @@ import 'dotenv/config';
 
 const isProd = process.env.NODE_ENV === 'production';
 
-function required(name, devDefault) {
-  const value = process.env[name] ?? (isProd ? undefined : devDefault);
+/** Segredos vêm só do ambiente (server/.env, fora do git); nunca há valores por omissão no código. */
+function required(name) {
+  const value = process.env[name];
   if (value === undefined || value === '') {
     throw new Error(`Variável de ambiente em falta: ${name}`);
   }
@@ -13,12 +14,12 @@ function required(name, devDefault) {
 export const config = {
   isProd,
   port: Number(process.env.PORT ?? 3100),
-  jwtSecret: required('JWT_SECRET', 'dev-only-secret-change-me'),
+  jwtSecret: required('JWT_SECRET'),
   jwtExpiresIn: process.env.JWT_EXPIRES_IN ?? '8h',
-  // Token exigido para inicializar o administrador de cada entidade. Vazio = endpoint desativado.
-  setupToken: process.env.SETUP_TOKEN ?? (isProd ? '' : 'dev-setup-token'),
+  // Token da inicialização única (cria o super administrador). Vazio = inicialização desativada.
+  setupToken: process.env.SETUP_TOKEN ?? '',
   // Chave que assina os códigos de autorização digital (independente do JWT para poder rodar este sem invalidar autorizações).
-  authorizationSecret: required('AUTHORIZATION_SECRET', 'dev-only-authorization-secret'),
+  authorizationSecret: required('AUTHORIZATION_SECRET'),
   // Dias que o transitário tem para liquidar após uma saída antecipada (carga perecível).
   commitmentDays: Number(process.env.PAYMENT_COMMITMENT_DAYS ?? 3),
   // URL pública do frontend (links nos e-mails).
@@ -40,9 +41,5 @@ export const config = {
     user: process.env.DB_USER ?? 'root',
     password: process.env.DB_PASSWORD ?? '',
     database: process.env.DB_NAME ?? 'sogester',
-  },
-  seed: {
-    superAdminEmail: process.env.SEED_SUPERADMIN_EMAIL ?? 'admin@sogester.local',
-    superAdminPassword: required('SEED_SUPERADMIN_PASSWORD', 'Admin@12345'),
   },
 };

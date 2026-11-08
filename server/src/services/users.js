@@ -5,8 +5,8 @@ import { ASSIGNABLE_ROLES, ROLES, isSuperAdmin } from '../roles.js';
 import { audit } from './audit.js';
 
 const SELECT = `SELECT id, name, email, role, entity_id AS entityId, forwarder_id AS forwarderId, active,
-                       last_login_at AS lastLoginAt, created_at AS createdAt FROM users`;
-const map = (u) => ({ ...u, active: !!u.active });
+                       can_manage_terminals AS canManageTerminals, last_login_at AS lastLoginAt, created_at AS createdAt FROM users`;
+const map = (u) => ({ ...u, active: !!u.active, canManageTerminals: !!u.canManageTerminals });
 
 /** Perfis que o ator pode atribuir ao criar/editar utilizadores de staff. */
 function assignableRoles(actor) {
@@ -51,8 +51,13 @@ export async function createUser(actor, { name, email, password, role, entityId 
   return map(await queryOne(`${SELECT} WHERE id = ?`, [res.insertId]));
 }
 
-export async function updateUser(actor, id, { name, role, active, password }) {
+export async function updateUser(actor, id, { name, role, active, password, canManageTerminals }) {
   const target = await loadManageable(actor, id);
+  // Só o super administrador delega a gestão de terminais, e só a funcionários da Sogester.
+  if (canManageTerminals !== undefined) {
+    if (!isSuperAdmin(actor)) throw forbidden('Só o super administrador delega a gestão de terminais');
+    if ([ROLES.TRANSITARIO, ROLES.SUPER_ADMIN].includes(target.role)) throw badRequest('Este utilizador não pode gerir terminais', 'NOT_STAFF');
+  }
   if (role !== undefined && !assignableRoles(actor).includes(role)) throw forbidden('Perfil não permitido');
   if (target.id === actor.id && (active === false || role !== undefined)) {
     throw forbidden('Não pode alterar o seu próprio perfil ou estado');
@@ -64,11 +69,12 @@ export async function updateUser(actor, id, { name, role, active, password }) {
   if (role !== undefined) (sets.push('role = ?'), params.push(role));
   if (active !== undefined) (sets.push('active = ?'), params.push(active ? 1 : 0));
   if (password !== undefined) (sets.push('password_hash = ?'), params.push(await bcrypt.hash(password, 10)));
+  if (canManageTerminals !== undefined) (sets.push('can_manage_terminals = ?'), params.push(canManageTerminals ? 1 : 0));
   if (sets.length) {
     await pool.query(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`, [...params, id]);
     await audit(actor, 'USER_UPDATED', 'user', id, {
       entityId: target.entityId,
-      details: { name, role, active, passwordReset: password !== undefined },
+      details: { name, role, active, canManageTerminals, passwordReset: password !== undefined },
     });
   }
   return map(await queryOne(`${SELECT} WHERE id = ?`, [id]));
