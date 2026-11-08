@@ -29,6 +29,9 @@ Camada digital entre transitários e a Sogester (terminais de Cabinda, Soyo e Lu
 - Carga: dados de transporte como na nota da JUP (B/L, DU, navio, viagem, tipo de descarga e peso obrigatórios; regime,
   manifesto, volumes, origem e destino opcionais) e listas de veículos (chassi obrigatório), contentores (totais de 20/40/45
   pés calculados) e mercadorias; um processo pode misturar tipos e cada mercadoria indica o veículo ou contentor que a leva.
+- Correções: ao pedir correções, a Loja marca cada documento recusado, documento em falta ou campo errado com o motivo;
+  o transitário vê só esses pontos, envia o documento ou o valor corrigido e só reenvia com tudo resolvido. Cada ronda
+  fica guardada (valor antigo e novo) e o reenvio regista no histórico o que foi corrigido.
 - Arquivados: processos concluídos, rejeitados e cancelados saem da lista atual para /arquivados (com pesquisa);
   continuam guardados, a numeração não muda e reabrir um rejeitado tira-o do arquivo.
 - Passo 7: relatórios (/relatorios) com exportação CSV e impressão/PDF. Processos (estados, prioridades, tempos

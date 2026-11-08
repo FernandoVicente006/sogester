@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { pool, query, queryOne, withTransaction } from '../db/pool.js';
 import { badRequest, conflict, forbidden, notFound } from '../errors.js';
-import { CARGO_PRIORITIES, VOLUME_TYPES, isVehicleCategory } from '../cargo.js';
+import { CARGO_PRIORITIES, DOCUMENT_KINDS, UPLOADABLE_KINDS, VOLUME_TYPES, isVehicleCategory } from '../cargo.js';
 import { isForwarder, isSuperAdmin } from '../roles.js';
 import { audit } from './audit.js';
 import { isApprovedIn } from './forwarders.js';
@@ -22,7 +22,23 @@ export const STAFF_TRANSITIONS = {
   DOCUMENTOS_SUBMETIDOS: ['EM_ANALISE', 'EM_PROCESSAMENTO_INTERNO', 'DOCUMENTOS_PENDENTES', 'REJEITADO'],
   EM_PROCESSAMENTO_INTERNO: ['DOCUMENTOS_PENDENTES', 'REJEITADO'], // anomalia detetada nos procedimentos internos
 };
-const NOTES_REQUIRED = ['DOCUMENTOS_PENDENTES', 'REJEITADO'];
+const NOTES_REQUIRED = ['REJEITADO'];
+
+/** Campos que a Loja pode marcar como errados e o transitário corrige sem refazer o processo. */
+export const CORRECTABLE_FIELDS = {
+  blNumber: { column: 'bl_number', label: 'N.º do B/L' },
+  duNumber: { column: 'du_number', label: 'N.º do DU' },
+  vesselName: { column: 'vessel_name', label: 'Navio' },
+  voyageNumber: { column: 'voyage_number', label: 'N.º da viagem' },
+  dischargeType: { column: 'discharge_type', label: 'Tipo de descarga' },
+  regime: { column: 'regime', label: 'Regime' },
+  manifestNumber: { column: 'manifest_number', label: 'N.º do manifesto' },
+  weightKg: { column: 'weight_kg', label: 'Peso bruto (kg)' },
+  packagesCount: { column: 'packages_count', label: 'N.º de volumes' },
+  originCountry: { column: 'origin_country', label: 'País de origem' },
+  destinationCountry: { column: 'destination_country', label: 'País de destino' },
+  description: { column: 'description', label: 'Descrição geral' },
+};
 /** Estados finais: o processo vai para os Arquivados. */
 export const ARCHIVED_STATUSES = ['CONCLUIDO', 'REJEITADO', 'CANCELADO'];
 
@@ -292,7 +308,7 @@ export async function processStats(actor) {
 
 export async function getProcess(actor, id) {
   const process = mapProcess(await loadAccessible(actor, id));
-  const [documents, history, commitment, authorization, invoice, extensions, vehicles, containers, goods] = await Promise.all([
+  const [documents, history, commitment, authorization, invoice, extensions, vehicles, containers, goods, issues] = await Promise.all([
     query(
       `SELECT id, kind, original_name AS originalName, mime_type AS mimeType, size_bytes AS sizeBytes,
               created_at AS createdAt FROM process_documents WHERE process_id = ? ORDER BY id`,
@@ -347,6 +363,14 @@ export async function getProcess(actor, id) {
         WHERE g.process_id = ? ORDER BY g.position`,
       [id],
     ),
+    query(
+      `SELECT i.id, i.kind, i.document_id AS documentId, i.document_kind AS documentKind, i.field, i.label, i.reason,
+              i.created_at AS createdAt, u.name AS createdBy, i.fixed_at AS fixedAt, i.old_value AS oldValue,
+              i.new_value AS newValue, i.closed_at AS closedAt
+         FROM process_issues i JOIN users u ON u.id = i.created_by
+        WHERE i.process_id = ? ORDER BY i.id`,
+      [id],
+    ),
   ]);
   const containerList = containers.map((c) => ({ ...c, weightKg: num(c.weightKg) }));
   return {
@@ -358,6 +382,7 @@ export async function getProcess(actor, id) {
     containers: containerList,
     containerTotals: Object.fromEntries(['20', '40', '45'].map((s) => [s, containerList.filter((c) => c.size === s).length])),
     goods: goods.map((g) => ({ ...g, quantity: num(g.quantity), weightKg: num(g.weightKg) })),
+    issues,
     commitment: commitment ? { ...commitment, extensions, extensionsLeft: Math.max(0, MAX_EXTENSIONS - commitment.extensionCount) } : null,
     authorization: authorization ?? null,
     invoice: invoice ? { ...invoice, amount: num(invoice.amount) } : null,
@@ -385,12 +410,39 @@ export async function changeStatus(actor, process, toStatus, notes, conn = pool)
 }
 
 /** Análise pela Sogester (Loja, administrador da entidade ou super admin). */
-export async function transition(actor, id, { status, notes }) {
+/** Valida as correções pedidas e prepara o texto de cada uma (fica guardado, mesmo que o documento mude). */
+async function prepareIssues(processId, issues) {
+  const prepared = [];
+  for (const [i, issue] of issues.entries()) {
+    const bad = (message) => badRequest('Correção inválida', 'VALIDATION_ERROR', [{ field: `issues.${i}`, message }]);
+    if (issue.kind === 'DOCUMENTO') {
+      const doc = await queryOne('SELECT id, kind, original_name AS name FROM process_documents WHERE id = ? AND process_id = ?', [issue.documentId ?? 0, processId]);
+      if (!doc || !UPLOADABLE_KINDS.includes(doc.kind)) throw bad('Documento inexistente neste processo');
+      prepared.push({ ...issue, documentKind: doc.kind, label: `${DOCUMENT_KINDS[doc.kind]}: ${doc.name}` });
+    } else if (issue.kind === 'EM_FALTA') {
+      if (!UPLOADABLE_KINDS.includes(issue.documentKind)) throw bad('Indique o tipo de documento em falta');
+      prepared.push({ ...issue, documentId: null, label: `Em falta: ${DOCUMENT_KINDS[issue.documentKind]}` });
+    } else {
+      if (!CORRECTABLE_FIELDS[issue.field]) throw bad('Campo que não pode ser corrigido');
+      prepared.push({ ...issue, documentId: null, documentKind: null, label: CORRECTABLE_FIELDS[issue.field].label });
+    }
+  }
+  return prepared;
+}
+
+export async function transition(actor, id, { status, notes, issues = [] }) {
   const process = await loadAccessible(actor, id);
   if (!(STAFF_TRANSITIONS[process.status] ?? []).includes(status)) {
     throw conflict(`Transição ${process.status} → ${status} não permitida`, 'INVALID_TRANSITION');
   }
   if (NOTES_REQUIRED.includes(status) && !notes) throw badRequest('Indique o motivo ou os documentos em falta', 'NOTES_REQUIRED');
+  if (status === 'DOCUMENTOS_PENDENTES' && !notes && !issues.length) {
+    throw badRequest('Indique o que tem de ser corrigido', 'NOTES_REQUIRED');
+  }
+  const prepared = status === 'DOCUMENTOS_PENDENTES' ? await prepareIssues(id, issues) : [];
+  // O resumo das correções é o motivo que o transitário vê e que fica no histórico.
+  const summary = prepared.map((p) => `${p.label} — ${p.reason}`).join('; ');
+  notes = [notes, summary].filter(Boolean).join(' · ').slice(0, 500) || notes;
   if (status === 'REJEITADO' && (await queryOne('SELECT id FROM authorizations WHERE process_id = ? AND revoked_at IS NULL', [id]))) {
     throw conflict('Há uma saída antecipada ativa: revogue-a antes de rejeitar', 'EARLY_RELEASE_BINDING');
   }
@@ -401,6 +453,16 @@ export async function transition(actor, id, { status, notes }) {
         'UPDATE processes SET docs_baseline_id = (SELECT COALESCE(MAX(id), 0) FROM process_documents WHERE process_id = ?) WHERE id = ?',
         [id, id],
       );
+      for (const p of prepared) {
+        await conn.query(
+          `INSERT INTO process_issues (process_id, kind, document_id, document_kind, field, label, reason, created_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [id, p.kind, p.documentId ?? null, p.documentKind ?? null, p.field ?? null, p.label, p.reason, actor.id],
+        );
+      }
+    }
+    if (status === 'REJEITADO') {
+      await conn.query('UPDATE process_issues SET closed_at = NOW() WHERE process_id = ? AND closed_at IS NULL', [id]);
     }
   });
   const event = {
@@ -420,8 +482,45 @@ export async function addDocument(actor, id, kind, file) {
   if (process.status !== 'DOCUMENTOS_PENDENTES') {
     throw conflict('Só pode anexar documentos quando a Sogester os solicitar', 'NOT_ACCEPTING_DOCUMENTS');
   }
-  await insertDocument(pool, id, kind, file, actor.id);
-  await audit(actor, 'PROCESS_DOCUMENT_ADDED', 'process', id, { entityId: process.entityId, details: { kind } });
+  await withTransaction(async (conn) => {
+    await insertDocument(conn, id, kind, file, actor.id);
+    // Um documento do tipo pedido resolve as correções desse tipo (substituição ou documento em falta).
+    await conn.query(
+      `UPDATE process_issues SET fixed_at = NOW(), fixed_document_id = LAST_INSERT_ID()
+        WHERE process_id = ? AND closed_at IS NULL AND fixed_at IS NULL AND document_kind = ?`,
+      [id, kind],
+    );
+    await audit(actor, 'PROCESS_DOCUMENT_ADDED', 'process', id, { entityId: process.entityId, details: { kind }, conn });
+  });
+  return getProcess(actor, id);
+}
+
+/** O transitário corrige os campos que a Loja marcou como errados. */
+export async function correctFields(actor, id, values) {
+  if (!isForwarder(actor)) throw forbidden();
+  const process = await loadAccessible(actor, id);
+  if (process.status !== 'DOCUMENTOS_PENDENTES') throw conflict('O processo não aguarda correções', 'INVALID_TRANSITION');
+  const fields = Object.keys(values).filter((f) => values[f] !== undefined);
+  if (!fields.length) throw badRequest('Indique o valor corrigido', 'VALIDATION_ERROR');
+
+  await withTransaction(async (conn) => {
+    for (const field of fields) {
+      const [[issue]] = await conn.query(
+        "SELECT id FROM process_issues WHERE process_id = ? AND closed_at IS NULL AND kind = 'CAMPO' AND field = ?",
+        [id, field],
+      );
+      if (!issue) throw conflict(`A Sogester não pediu a correção de «${CORRECTABLE_FIELDS[field].label}»`, 'FIELD_NOT_REQUESTED');
+      const { column } = CORRECTABLE_FIELDS[field];
+      const [[current]] = await conn.query(`SELECT ${column} AS value FROM processes WHERE id = ?`, [id]);
+      await conn.query(`UPDATE processes SET ${column} = ? WHERE id = ?`, [values[field], id]);
+      await conn.query('UPDATE process_issues SET fixed_at = NOW(), old_value = ?, new_value = ? WHERE id = ?', [
+        current.value === null ? null : String(current.value).slice(0, 255),
+        String(values[field]).slice(0, 255),
+        issue.id,
+      ]);
+    }
+    await audit(actor, 'PROCESS_FIELDS_CORRECTED', 'process', id, { entityId: process.entityId, details: values, conn });
+  });
   return getProcess(actor, id);
 }
 
@@ -432,12 +531,25 @@ export async function submitDocuments(actor, id) {
   if (process.status !== 'DOCUMENTOS_PENDENTES') {
     throw conflict('O processo não aguarda documentos', 'INVALID_TRANSITION');
   }
-  const sinceRequest = await queryOne(
-    'SELECT COUNT(*) AS n FROM process_documents WHERE process_id = ? AND id > (SELECT docs_baseline_id FROM processes WHERE id = ?)',
-    [id, id],
-  );
-  if (!sinceRequest.n) throw badRequest('Anexe pelo menos um documento antes de submeter', 'NO_NEW_DOCUMENTS');
-  await changeStatus(actor, process, 'DOCUMENTOS_SUBMETIDOS', null);
+  const open = await query('SELECT id, label, fixed_at AS fixedAt FROM process_issues WHERE process_id = ? AND closed_at IS NULL', [id]);
+  if (open.length) {
+    const pending = open.filter((i) => !i.fixedAt);
+    if (pending.length) {
+      throw badRequest('Ainda há correções por fazer', 'ISSUES_PENDING', pending.map((i) => ({ field: `issue.${i.id}`, message: i.label })));
+    }
+  } else {
+    // Pedido sem correções detalhadas: basta enviar pelo menos um documento novo.
+    const sinceRequest = await queryOne(
+      'SELECT COUNT(*) AS n FROM process_documents WHERE process_id = ? AND id > (SELECT docs_baseline_id FROM processes WHERE id = ?)',
+      [id, id],
+    );
+    if (!sinceRequest.n) throw badRequest('Anexe pelo menos um documento antes de submeter', 'NO_NEW_DOCUMENTS');
+  }
+  await withTransaction(async (conn) => {
+    const fixed = open.map((i) => i.label).join('; ');
+    await changeStatus(actor, process, 'DOCUMENTOS_SUBMETIDOS', fixed ? `Corrigido: ${fixed}`.slice(0, 500) : null, conn);
+    await conn.query('UPDATE process_issues SET closed_at = NOW() WHERE process_id = ? AND closed_at IS NULL', [id]);
+  });
   await notifyProcessEvent('DOCUMENTS_RESUBMITTED', process, { actor });
   return getProcess(actor, id);
 }

@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { api, errorText } from '../api.js'
 import { useAuth } from '../auth.jsx'
 import Chat from '../components/Chat.jsx'
+import { CorrectionsToDo, RequestCorrections, UPLOADABLE_LABELS, openIssues } from '../components/Corrections.jsx'
 import Viewer, { DocumentPane } from '../components/Viewer.jsx'
 import { ErrorBox, Field, Icon, Modal, PRIORITY_LABELS, PROCESS_STATUS_LABELS, ProcessBadge, formatDate } from '../components/ui.jsx'
 
@@ -67,12 +68,12 @@ const VOLUME_LABELS = { AUTO: 'Auto', CARGA_GRANEL: 'Carga granel', CARGA_GERAL:
 // Transições que a Sogester pode fazer a partir de cada estado (espelha o servidor).
 const STAFF_ACTIONS = {
   SUBMETIDO: [['EM_ANALISE', 'Iniciar análise'], ['REJEITADO', 'Rejeitar']],
-  EM_ANALISE: [['EM_PROCESSAMENTO_INTERNO', 'Documentos conformes'], ['DOCUMENTOS_PENDENTES', 'Pedir documentos'], ['REJEITADO', 'Rejeitar']],
+  EM_ANALISE: [['EM_PROCESSAMENTO_INTERNO', 'Documentos conformes'], ['DOCUMENTOS_PENDENTES', 'Pedir correções'], ['REJEITADO', 'Rejeitar']],
   DOCUMENTOS_PENDENTES: [['REJEITADO', 'Rejeitar (sem resposta)']],
-  DOCUMENTOS_SUBMETIDOS: [['EM_PROCESSAMENTO_INTERNO', 'Documentos conformes'], ['EM_ANALISE', 'Voltar à análise'], ['DOCUMENTOS_PENDENTES', 'Pedir documentos'], ['REJEITADO', 'Rejeitar']],
-  EM_PROCESSAMENTO_INTERNO: [['DOCUMENTOS_PENDENTES', 'Pedir documentos'], ['REJEITADO', 'Rejeitar']],
+  DOCUMENTOS_SUBMETIDOS: [['EM_PROCESSAMENTO_INTERNO', 'Documentos conformes'], ['EM_ANALISE', 'Voltar à análise'], ['DOCUMENTOS_PENDENTES', 'Pedir correções'], ['REJEITADO', 'Rejeitar']],
+  EM_PROCESSAMENTO_INTERNO: [['DOCUMENTOS_PENDENTES', 'Pedir correções'], ['REJEITADO', 'Rejeitar']],
 }
-const NOTES_REQUIRED = ['DOCUMENTOS_PENDENTES', 'REJEITADO']
+const NOTES_REQUIRED = ['REJEITADO']
 const BILLING_DOCS = ['PROFORMA', 'COMPROVATIVO', 'FATURA_RECIBO']
 const REVIEWERS = ['SUPER_ADMIN', 'ADMIN_ENTIDADE', 'LOJA']
 
@@ -97,6 +98,7 @@ export default function ProcessDetail() {
   const [notes, setNotes] = useState('')
   const [docKind, setDocKind] = useState('OUTRO')
   const [docFile, setDocFile] = useState(null)
+  const [requesting, setRequesting] = useState(false)
 
   const run = useCallback(async (fn) => {
     setError('')
@@ -167,6 +169,7 @@ export default function ProcessDetail() {
   }
 
   const transition = (status) => {
+    if (status === 'DOCUMENTOS_PENDENTES') return setRequesting(true)
     if (NOTES_REQUIRED.includes(status) && !notes.trim()) {
       setError('Indique o motivo ou os documentos em falta.')
       return
@@ -186,6 +189,7 @@ export default function ProcessDetail() {
     e.target.reset()
   }
 
+  const pendingIssues = openIssues(p)
   const documentPath = (doc) => `/processes/${id}/documents/${doc.id}`
   const open = (doc) => setViewing({ path: documentPath(doc), name: doc.originalName })
   // Um comprovativo recusado é substituído: o último documento de cada tipo é o que conta.
@@ -379,7 +383,7 @@ export default function ProcessDetail() {
               </li>
             ))}
           </ul>
-          <Field label="Motivo / documentos em falta (obrigatório ao pedir documentos ou rejeitar)">
+          <Field label="Motivo (obrigatório para rejeitar)">
             <input value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={500} />
           </Field>
           <div className="actions-left">
@@ -610,6 +614,8 @@ export default function ProcessDetail() {
         </section>
       )}
 
+      {isForwarder && p.status === 'DOCUMENTOS_PENDENTES' && pendingIssues.length > 0 && <CorrectionsToDo key={p.issues.length} process={p} run={run} />}
+
       <section className="card">
         <h3><Icon name="paperclip" /> Documentos</h3>
         <ul className="docs">
@@ -619,6 +625,7 @@ export default function ProcessDetail() {
               <button className="link" onClick={() => open(d)}>
                 {DOC_LABELS[d.kind]}: {d.originalName}
               </button>
+              {pendingIssues.some((i) => i.documentId === d.id) && <span className="tag urgent">Recusado</span>}
               <span className="muted small" style={{ marginLeft: "auto" }}>{formatDate(d.createdAt)}</span>
             </li>
           ))}
@@ -628,7 +635,7 @@ export default function ProcessDetail() {
             <form onSubmit={upload} className="row end">
               <Field label="Tipo">
                 <select value={docKind} onChange={(e) => setDocKind(e.target.value)}>
-                  {Object.entries(DOC_LABELS).map(([k, v]) => (
+                  {Object.entries(UPLOADABLE_LABELS).map(([k, v]) => (
                     <option key={k} value={k}>
                       {v}
                     </option>
@@ -640,11 +647,13 @@ export default function ProcessDetail() {
               </Field>
               <button>Anexar</button>
             </form>
-            <p>
-              <button className="primary" onClick={() => run(() => api('POST', `/processes/${id}/submit-documents`))}>
-                Submeter documentos à Sogester
-              </button>
-            </p>
+            {pendingIssues.length === 0 && (
+              <p>
+                <button className="primary" onClick={() => run(() => api('POST', `/processes/${id}/submit-documents`))}>
+                  Submeter documentos à Sogester
+                </button>
+              </p>
+            )}
           </>
         )}
       </section>
@@ -653,6 +662,17 @@ export default function ProcessDetail() {
       <div>
       <Chat processId={p.id} closed={['CONCLUIDO', 'REJEITADO', 'CANCELADO'].includes(p.status)} onRead={() => window.dispatchEvent(new Event('sogester:unread'))} />
       {viewing && <Viewer path={viewing.path} name={viewing.name} onClose={() => setViewing(null)} />}
+      {requesting && (
+        <RequestCorrections
+          process={p}
+          documents={inspectable}
+          onClose={() => setRequesting(false)}
+          onSubmit={(body) => {
+            setRequesting(false)
+            run(() => api('POST', `/processes/${id}/transition`, { body: { status: 'DOCUMENTOS_PENDENTES', ...body } }))
+          }}
+        />
+      )}
       {paying && (
         <Modal title="Enviar comprovativo de pagamento" onClose={() => setPaying(false)}>
           <form

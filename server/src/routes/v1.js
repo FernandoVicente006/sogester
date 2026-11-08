@@ -178,6 +178,19 @@ const schemas = {
   processTransition: z.object({
     status: z.enum(['EM_ANALISE', 'EM_PROCESSAMENTO_INTERNO', 'DOCUMENTOS_PENDENTES', 'REJEITADO']),
     notes: z.string().trim().max(500).optional(),
+    // correções pedidas: documento recusado, documento em falta ou campo errado, cada uma com o motivo
+    issues: z
+      .array(
+        z.object({
+          kind: z.enum(['DOCUMENTO', 'EM_FALTA', 'CAMPO']),
+          documentId: id.optional(),
+          documentKind: z.enum(UPLOADABLE_KINDS).optional(),
+          field: z.enum(Object.keys(processes.CORRECTABLE_FIELDS)).optional(),
+          reason: z.string().trim().min(3, 'Indique o motivo').max(300),
+        }),
+      )
+      .max(30)
+      .optional(),
   }),
 };
 
@@ -398,6 +411,15 @@ v1.post(
   validate({ params: idParam, body: schemas.processTransition }),
   async (req, res) =>
     res.json({ process: await processes.transition(req.user, req.valid.params.id, req.valid.body) }),
+);
+// O transitário corrige os campos que a Loja marcou (só esses).
+const fieldCorrection = schemas.processCreate.pick(Object.fromEntries(Object.keys(processes.CORRECTABLE_FIELDS).map((f) => [f, true]))).partial();
+v1.patch(
+  '/processes/:id/fields',
+  authenticate,
+  requireRole(TRANSITARIO),
+  validate({ params: idParam, body: fieldCorrection }),
+  async (req, res) => res.json({ process: await processes.correctFields(req.user, req.valid.params.id, req.valid.body) }),
 );
 v1.post(
   '/processes/:id/documents',

@@ -256,6 +256,41 @@ test('submissão, fila, estados e documentos de processos', async () => {
   assert.deepEqual(resubmitted.body.process.history.map((h) => h.toStatus), [
     'SUBMETIDO', 'EM_ANALISE', 'DOCUMENTOS_PENDENTES', 'DOCUMENTOS_SUBMETIDOS',
   ]);
+  // --- correções detalhadas: documento recusado, documento em falta e campo errado
+  const ep17 = resubmitted.body.process.documents.find((d) => d.kind === 'EP17');
+  const issues = [
+    { kind: 'DOCUMENTO', documentId: ep17.id, reason: 'Ilegível' },
+    { kind: 'EM_FALTA', documentKind: 'ALVARA', reason: 'Obrigatório para a importação' },
+    { kind: 'CAMPO', field: 'duNumber', reason: 'Não corresponde ao DU do documento' },
+  ];
+  const pathOf = (suffix) => `/processes/${p1.id}/${suffix}`;
+  const badIssue = await api('POST', pathOf('transition'), {
+    token: loja,
+    body: { status: 'DOCUMENTOS_PENDENTES', issues: [{ kind: 'DOCUMENTO', documentId: 999999, reason: 'Ilegível' }] },
+  });
+  assert.equal(badIssue.status, 400, 'documento tem de ser do processo');
+  const round = (await api('POST', pathOf('transition'), { token: loja, body: { status: 'DOCUMENTOS_PENDENTES', issues } })).body.process;
+  assert.equal(round.status, 'DOCUMENTOS_PENDENTES');
+  assert.equal(round.issues.filter((i) => !i.closedAt).length, 3);
+  assert.match(round.statusNotes, /EP17 .* — Ilegível; Em falta: Alvará comercial — Obrigatório.*N\.º do DU — Não corresponde/);
+
+  const pending = await api('POST', pathOf('submit-documents'), { token: fwdA });
+  assert.equal(pending.body.error.code, 'ISSUES_PENDING');
+  assert.equal(pending.body.error.details.length, 3);
+  assert.equal((await api('PATCH', pathOf('fields'), { token: fwdA, body: { blNumber: 'BL-OUTRO' } })).body.error.code, 'FIELD_NOT_REQUESTED');
+  assert.equal((await api('PATCH', pathOf('fields'), { token: loja, body: { duNumber: 'X' } })).status, 403);
+  const corrected = (await api('PATCH', pathOf('fields'), { token: fwdA, body: { duNumber: '2026R7000' } })).body.process;
+  assert.equal(corrected.duNumber, '2026R7000');
+  const fieldIssue = corrected.issues.find((i) => i.field === 'duNumber');
+  assert.deepEqual([fieldIssue.oldValue, fieldIssue.newValue, !!fieldIssue.fixedAt], ['2026R6028', '2026R7000', true]);
+  assert.equal((await addDoc(fwdA, 'EP17')).status, 201);
+  assert.equal((await api('POST', pathOf('submit-documents'), { token: fwdA })).body.error.details.length, 1, 'falta o alvará');
+  assert.equal((await addDoc(fwdA, 'ALVARA')).status, 201);
+  const fixed = (await api('POST', pathOf('submit-documents'), { token: fwdA })).body.process;
+  assert.equal(fixed.status, 'DOCUMENTOS_SUBMETIDOS');
+  assert.ok(fixed.issues.every((i) => i.closedAt), 'ronda encerrada');
+  assert.match(fixed.history.at(-1).notes, /^Corrigido: /, 'o histórico regista as correções');
+
   const rejected = await api('POST', `/processes/${p1.id}/transition`, { token: admin, body: { status: 'REJEITADO', notes: 'Documentos ilegíveis' } });
   assert.equal(rejected.body.process.status, 'REJEITADO');
 
