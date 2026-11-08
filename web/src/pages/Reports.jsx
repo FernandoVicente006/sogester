@@ -2,56 +2,61 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { api, downloadFile, errorText } from '../api.js'
 import { useAuth } from '../auth.jsx'
-import { Empty, ErrorBox, Field, Icon, PRIORITY_LABELS, PROCESS_STATUS_LABELS, PageHeader, ProcessBadge, formatDate } from '../components/ui.jsx'
+import { ErrorBox, Field, Icon, PRIORITY_LABELS, PROCESS_STATUS_LABELS, PageHeader, ProcessBadge, formatDate } from '../components/ui.jsx'
+import { ColumnPairChart, DataTable, HBarChart, Meter, Panel, SegmentedBar, StatCard } from '../components/ReportKit.jsx'
+import '../reports.css'
 
 const BILLING_ROLES = ['SUPER_ADMIN', 'ADMIN_ENTIDADE', 'FINANCAS', 'CHEFE_COMERCIAL']
 const VOLUME_LABELS = { AUTO: 'Auto', CARGA_GRANEL: 'Carga granel', CARGA_GERAL: 'Carga geral', CONTENTOR: 'Contentor' }
+const TAB_LABELS = { terminals: 'Terminais', processes: 'Processos', revenue: 'Receita', overdue: 'Atrasos' }
 
 const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 const daysAgo = (n) => ymd(new Date(Date.now() - n * 86400000))
+const PRESETS = [
+  ['7 dias', () => daysAgo(6)],
+  ['30 dias', () => daysAgo(29)],
+  ['90 dias', () => daysAgo(89)],
+  ['Este ano', () => `${new Date().getFullYear()}-01-01`],
+]
 
 const money = (amount, currency = 'AOA') => new Intl.NumberFormat('pt-AO', { style: 'currency', currency }).format(amount ?? 0)
-const fmtHours = (h) => (h === null || h === undefined ? '—' : h < 48 ? `${h} h` : `${(h / 24).toFixed(1).replace('.', ',')} dias`)
-const monthLabel = (m) => new Date(`${m}-01T12:00:00`).toLocaleDateString('pt-PT', { month: 'short', year: '2-digit' })
-
-function Kpi({ icon, tone = '', value, label, money: isMoney }) {
-  return (
-    <div className={`kpi ${tone}`}>
-      <span className="kpi-icon">
-        <Icon name={icon} />
-      </span>
-      <div>
-        <div className={isMoney ? 'kpi-value money' : 'kpi-value'}>{value}</div>
-        <div className="kpi-label">{label}</div>
-      </div>
-    </div>
-  )
+const compactMoney = (amount, currency = 'AOA') =>
+  new Intl.NumberFormat('pt-AO', { style: 'currency', currency, notation: 'compact', maximumFractionDigits: 1 }).format(amount ?? 0)
+const fmtHours = (h) => (h === null || h === undefined ? '—' : h < 48 ? `${String(h).replace('.', ',')} h` : `${(h / 24).toFixed(1).replace('.', ',')} dias`)
+const MONTHS = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez']
+const monthLabel = (m) => `${MONTHS[Number(m.slice(5, 7)) - 1]} ${m.slice(0, 4)}`
+const longDate = (d) => {
+  const [y, m, day] = d.split('-')
+  return `${Number(day)} ${MONTHS[Number(m) - 1]} ${y}`
 }
+const shortDate = (d) => (d ? new Date(d).toLocaleDateString('pt-PT', { day: '2-digit', month: '2-digit', year: '2-digit' }) : '—')
+const pct = (a, b) => (b ? `${Math.round((a / b) * 100)}%` : '—')
 
-/** Barras horizontais proporcionais ao maior valor; o valor vem sempre escrito ao lado. */
-function BarList({ items, tone = '', format = (v) => v }) {
-  const max = Math.max(1, ...items.map((i) => i.value))
-  if (!items.length) return <p className="muted small">Sem dados no período.</p>
-  return (
-    <div className="bars">
-      {items.map((i) => (
-        <div className="bar-row" key={i.label}>
-          <span>{i.label}</span>
-          <span className="bar-track" aria-hidden="true">
-            <span className={`bar-fill ${tone}`} style={{ width: `${(i.value / max) * 100}%`, display: 'block' }} />
-          </span>
-          <span className="bar-value">{format(i.value)}</span>
-        </div>
-      ))}
-    </div>
-  )
-}
+/** Grupos de estado para a barra empilhada: concluídos, em curso na Sogester, à espera do transitário, fechados. */
+const STATUS_GROUPS = [
+  ['done', 'Concluídos', ['CONCLUIDO']],
+  ['active', 'Com a Sogester', ['SUBMETIDO', 'EM_ANALISE', 'DOCUMENTOS_SUBMETIDOS', 'EM_PROCESSAMENTO_INTERNO', 'PAGAMENTO_SUBMETIDO', 'PAGAMENTO_CONFIRMADO']],
+  ['waiting', 'À espera do transitário', ['DOCUMENTOS_PENDENTES', 'PAGAMENTO_PENDENTE']],
+  ['closed', 'Rejeitados ou cancelados', ['REJEITADO', 'CANCELADO']],
+]
+
+const refLink = (r) => (
+  <Link to={`/processos/${r.id}`} className="rpt-strong">
+    {r.reference}
+  </Link>
+)
+const cargoTags = (r) => (
+  <>
+    {r.urgent && <span className="tag urgent">Urgente</span>}
+    <span className={`tag prio-${r.cargoPriority}`}>{PRIORITY_LABELS[r.cargoPriority]}</span>
+  </>
+)
 
 export default function Reports() {
   const { user } = useAuth()
   const canBill = BILLING_ROLES.includes(user.role)
-  const [params, setParams] = useSearchParams()
   const isMaster = user.role === 'SUPER_ADMIN'
+  const [params, setParams] = useSearchParams()
   const requested = params.get('tab')
   const allowed = [...(isMaster ? ['terminals'] : []), 'processes', ...(canBill ? ['revenue', 'overdue'] : [])]
   const tab = allowed.includes(requested) ? requested : allowed[0]
@@ -66,13 +71,20 @@ export default function Reports() {
 
   useEffect(() => {
     api('GET', '/forwarders').then((r) => setForwarders(r.forwarders)).catch(() => {})
-    if (user.role === 'SUPER_ADMIN') api('GET', '/entities').then((r) => setEntities(r.entities)).catch(() => {})
-  }, [user.role])
+    if (isMaster) api('GET', '/entities').then((r) => setEntities(r.entities)).catch(() => {})
+  }, [isMaster])
 
   const query = useCallback(
     (extra = {}) => {
       const q = new URLSearchParams()
-      const used = tab === 'terminals' ? ['from', 'to', 'minHours'] : tab === 'overdue' ? ['entityId', 'minHours'] : tab === 'revenue' ? ['from', 'to', 'forwarderId', 'entityId'] : ['from', 'to', 'status', 'priority', 'forwarderId', 'entityId']
+      const used =
+        tab === 'terminals'
+          ? ['from', 'to', 'minHours']
+          : tab === 'overdue'
+            ? ['entityId', 'minHours']
+            : tab === 'revenue'
+              ? ['from', 'to', 'forwarderId', 'entityId']
+              : ['from', 'to', 'status', 'priority', 'forwarderId', 'entityId']
       for (const k of used) if (filters[k]) q.set(k, filters[k])
       for (const [k, v] of Object.entries(extra)) q.set(k, v)
       return q.toString()
@@ -102,12 +114,13 @@ export default function Reports() {
 
   // o relatório em memória pode ser de outro separador enquanto o novo carrega
   const data = report?.forTab === tab ? report.data : null
-  const TAB_LABELS = { terminals: 'Terminais', processes: 'Processos', revenue: 'Receita', overdue: 'Atrasos' }
-  const tabs = allowed.map((k) => [k, TAB_LABELS[k]])
+  const dated = tab !== 'overdue'
+  const today = ymd(new Date())
+  const activePreset = PRESETS.find(([, from]) => filters.from === from() && filters.to === today)?.[0]
 
   return (
     <>
-      <PageHeader title="Relatórios" subtitle={isMaster ? 'Indicadores de todos os terminais, lado a lado ou um a um.' : 'Indicadores e exportação de dados do terminal.'}>
+      <PageHeader title="Relatórios" subtitle={isMaster ? 'Indicadores de todos os terminais, lado a lado ou um a um.' : 'Indicadores do terminal, para acompanhar e exportar.'}>
         <button className="no-print" onClick={() => window.print()}>
           <Icon name="printer" /> Imprimir / PDF
         </button>
@@ -118,87 +131,100 @@ export default function Reports() {
         )}
       </PageHeader>
 
-      <div className="tabs" role="tablist">
-        {tabs.map(([key, label]) => (
-          <button key={key} role="tab" aria-selected={tab === key} className={tab === key ? 'tab active' : 'tab'} onClick={() => setParams({ tab: key })}>
-            {label}
-          </button>
-        ))}
+      <div className="rpt-toolbar no-print">
+        <div className="rpt-segmented" role="tablist" aria-label="Relatório">
+          {allowed.map((key) => (
+            <button key={key} role="tab" aria-selected={tab === key} className={tab === key ? 'active' : ''} onClick={() => setParams({ tab: key })}>
+              {TAB_LABELS[key]}
+            </button>
+          ))}
+        </div>
+        {loading && <span className="rpt-count">A atualizar…</span>}
       </div>
 
-      <section className="card no-print">
-        <div className="filter-grid">
-          {tab !== 'overdue' && (
-            <>
-              <Field label="De">
-                <input type="date" value={filters.from} max={filters.to} onChange={set('from')} />
-              </Field>
-              <Field label="Até">
-                <input type="date" value={filters.to} min={filters.from} onChange={set('to')} />
-              </Field>
-            </>
-          )}
-          {isMaster && tab !== 'terminals' && (
-            <Field label="Terminal">
-              <select value={filters.entityId} onChange={set('entityId')}>
+      <div className="rpt-filterbar no-print">
+        {dated && (
+          <>
+            <div className="rpt-presets" role="group" aria-label="Período rápido">
+              {PRESETS.map(([label, from]) => (
+                <button key={label} type="button" className={activePreset === label ? 'active' : ''} onClick={() => setFilters((f) => ({ ...f, from: from(), to: today }))}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <Field label="De">
+              <input type="date" value={filters.from} max={filters.to} onChange={set('from')} />
+            </Field>
+            <Field label="Até">
+              <input type="date" value={filters.to} min={filters.from} onChange={set('to')} />
+            </Field>
+          </>
+        )}
+        {isMaster && tab !== 'terminals' && (
+          <Field label="Terminal">
+            <select value={filters.entityId} onChange={set('entityId')}>
+              <option value="">Todos</option>
+              {entities.map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
+        {(tab === 'processes' || tab === 'revenue') && (
+          <Field label="Transitário">
+            <select value={filters.forwarderId} onChange={set('forwarderId')}>
+              <option value="">Todos</option>
+              {forwarders.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
+        {tab === 'processes' && (
+          <>
+            <Field label="Estado">
+              <select value={filters.status} onChange={set('status')}>
                 <option value="">Todos</option>
-                {entities.map((e) => (
-                  <option key={e.id} value={e.id}>
-                    {e.name}
+                {Object.entries(PROCESS_STATUS_LABELS).map(([k, v]) => (
+                  <option key={k} value={k}>
+                    {v}
                   </option>
                 ))}
               </select>
             </Field>
-          )}
-          {!['overdue', 'terminals'].includes(tab) && (
-            <Field label="Transitário">
-              <select value={filters.forwarderId} onChange={set('forwarderId')}>
-                <option value="">Todos</option>
-                {forwarders.map((f) => (
-                  <option key={f.id} value={f.id}>
-                    {f.name}
+            <Field label="Prioridade">
+              <select value={filters.priority} onChange={set('priority')}>
+                <option value="">Todas</option>
+                {Object.entries(PRIORITY_LABELS).map(([k, v]) => (
+                  <option key={k} value={k}>
+                    {v}
                   </option>
                 ))}
               </select>
             </Field>
-          )}
-          {tab === 'processes' && (
-            <>
-              <Field label="Estado">
-                <select value={filters.status} onChange={set('status')}>
-                  <option value="">Todos</option>
-                  {Object.entries(PROCESS_STATUS_LABELS).map(([k, v]) => (
-                    <option key={k} value={k}>
-                      {v}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Prioridade">
-                <select value={filters.priority} onChange={set('priority')}>
-                  <option value="">Todas</option>
-                  {Object.entries(PRIORITY_LABELS).map(([k, v]) => (
-                    <option key={k} value={k}>
-                      {v}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-            </>
-          )}
-          {['overdue', 'terminals'].includes(tab) && (
-            <Field label="Processo parado há mais de">
-              <select value={filters.minHours} onChange={set('minHours')}>
-                {[[0, 'qualquer tempo'], [24, '24 horas'], [48, '48 horas'], [72, '3 dias'], [168, '7 dias']].map(([h, l]) => (
-                  <option key={h} value={h}>
-                    {l}
-                  </option>
-                ))}
-              </select>
-            </Field>
-          )}
-        </div>
-      </section>
+          </>
+        )}
+        {(tab === 'overdue' || tab === 'terminals') && (
+          <Field label="Parado há mais de">
+            <select value={filters.minHours} onChange={set('minHours')}>
+              {[[0, 'qualquer tempo'], [24, '24 horas'], [48, '48 horas'], [72, '3 dias'], [168, '7 dias']].map(([h, l]) => (
+                <option key={h} value={h}>
+                  {l}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
+        {dated && data?.period && (
+          <span className="rpt-period">
+            {longDate(data.period.from)} – {longDate(data.period.to)}
+          </span>
+        )}
+      </div>
 
       <ErrorBox message={error} />
       {loading && !data && <p className="muted">A carregar…</p>}
@@ -210,372 +236,369 @@ export default function Reports() {
   )
 }
 
-const moneyList = (list) => (list.length ? list.map((m) => money(m.amount, m.currency)).join(' · ') : '—')
+// ---- Terminais (administrador geral) -----------------------------------------------------------
+const moneyList = (list) => (list.length ? list.map((m) => money(m.amount, m.currency)).join(' + ') : '—')
 const amountIn = (list, currency) => list.find((m) => m.currency === currency)?.amount ?? 0
 
-/** Administrador geral: todos os terminais lado a lado no mesmo período. */
 function TerminalsView({ report }) {
   const t = report.totals
   const rows = report.rows
   const currencies = [...new Set(rows.flatMap((r) => [...r.invoiced, ...r.collected].map((m) => m.currency)))]
-  const currency = currencies.includes('AOA') ? 'AOA' : currencies[0] ?? 'AOA'
+  const currency = currencies.includes('AOA') ? 'AOA' : (currencies[0] ?? 'AOA')
   const bars = (pick) => rows.map((r) => ({ label: r.name, value: pick(r) })).sort((a, b) => b.value - a.value)
+  const maxProc = Math.max(1, ...rows.map((r) => r.processes))
+  const maxCollected = Math.max(1, ...rows.map((r) => amountIn(r.collected, currency)))
+  const alerts = t.overduePayments + t.stalled
+
+  const columns = [
+    {
+      key: 'name',
+      label: 'Terminal',
+      wrap: true,
+      render: (r) => (
+        <>
+          <span className="rpt-strong">{r.name}</span>
+          <span className="rpt-sub">
+            {r.staff} na equipa · {r.forwarders} {r.forwarders === 1 ? 'transitário' : 'transitários'}
+            {!r.active && ' · inativo'}
+          </span>
+        </>
+      ),
+    },
+    { key: 'processes', label: 'Processos', num: true, bar: (r) => r.processes / maxProc },
+    { key: 'inProgress', label: 'Em curso', num: true },
+    { key: 'completed', label: 'Concluídos', num: true, render: (r) => (r.processes ? `${r.completed} · ${pct(r.completed, r.processes)}` : '0'), sort: (r) => r.completed },
+    { key: 'avgHoursToComplete', label: 'Até concluir', num: true, render: (r) => fmtHours(r.avgHoursToComplete) },
+    {
+      key: 'collected',
+      label: `Cobrado (${currency})`,
+      num: true,
+      sort: (r) => amountIn(r.collected, currency),
+      render: (r) => money(amountIn(r.collected, currency), currency),
+      bar: (r) => amountIn(r.collected, currency) / maxCollected,
+    },
+    { key: 'outstanding', label: 'Em aberto', num: true, sort: (r) => amountIn(r.outstanding, currency), render: (r) => moneyList(r.outstanding) },
+    {
+      key: 'alerts',
+      label: 'Alertas',
+      num: true,
+      sort: (r) => r.overduePayments + r.stalled,
+      render: (r) =>
+        r.overduePayments + r.stalled ? (
+          <span className="rpt-chip bad">
+            <Icon name="alert" /> {r.overduePayments} atraso · {r.stalled} parados
+          </span>
+        ) : (
+          <span className="rpt-chip ok">
+            <Icon name="check" /> Sem alertas
+          </span>
+        ),
+    },
+    { key: 'earlyReleases', label: 'Saídas antec.', num: true, render: (r) => (r.earlyReleases ? `${r.earlyReleases} (${r.earlyReleasesUsed} usadas)` : '0') },
+  ]
+
   return (
     <>
-      <div className="kpis">
-        <Kpi icon="building" value={`${t.activeTerminals} de ${t.terminals}`} label="Terminais ativos" />
-        <Kpi icon="clipboard" value={t.processes} label="Processos no período (todos)" />
-        <Kpi icon="check" tone="green" value={t.completed} label="Concluídos" />
-        <Kpi icon="clock" tone="amber" value={t.inProgress} label="Em curso" />
-        <Kpi icon="check" tone="green" money value={moneyList(t.collected)} label="Cobrado no período" />
-        <Kpi icon="alert" tone="red" value={t.overduePayments + t.stalled} label="Pagamentos em atraso e processos parados" />
+      <div className="rpt-stats">
+        <StatCard icon="building" label="Terminais ativos" value={`${t.activeTerminals} de ${t.terminals}`} hint={`${t.staff} pessoas nas equipas`} />
+        <StatCard icon="clipboard" label="Processos" value={t.processes} hint={`${t.inProgress} em curso · ${t.urgent} com urgência`} />
+        <StatCard icon="check" tone="ok" label="Concluídos" value={t.completed} hint={`${pct(t.completed, t.processes)} dos processos do período`}>
+          <Meter value={t.completed} total={t.processes} label="Taxa de conclusão" />
+        </StatCard>
+        <StatCard icon="card" label="Cobrado" value={moneyList(t.collected)} hint={`Faturado: ${moneyList(t.invoiced)}`} />
+        <StatCard
+          icon="alert"
+          tone={alerts ? 'bad' : 'ok'}
+          label="Alertas"
+          value={alerts}
+          hint={`${t.overduePayments} pagamentos em atraso · ${t.stalled} processos parados há mais de ${report.minHours} h`}
+        />
       </div>
-      <div className="two-col">
-        <section className="card">
-          <h3>Processos por terminal</h3>
-          <BarList items={bars((r) => r.processes)} />
-        </section>
-        <section className="card">
-          <h3>Cobrado por terminal ({currency})</h3>
-          <BarList items={bars((r) => amountIn(r.collected, currency))} tone="green" format={(v) => money(v, currency)} />
-        </section>
+
+      <div className="rpt-grid-2">
+        <Panel title="Processos por terminal" subtitle="Submetidos no período">
+          <HBarChart items={bars((r) => r.processes)} format={(v) => `${v}`} />
+        </Panel>
+        <Panel title="Cobrado por terminal" subtitle={`Pagamentos confirmados no período, em ${currency}`}>
+          <HBarChart items={bars((r) => amountIn(r.collected, currency))} format={(v) => money(v, currency)} />
+        </Panel>
       </div>
-      <div className="table-wrap">
-        <table>
-          <thead>
+
+      <Panel className="flush" title="Comparação entre terminais" subtitle="Clique num título de coluna para ordenar.">
+        <DataTable
+          columns={columns}
+          rows={rows}
+          rowKey={(r) => r.entityId}
+          searchable={false}
+          initialSort={{ key: 'processes', dir: 'desc' }}
+          footer={
             <tr>
-              <th>Terminal</th>
-              <th className="num">Equipa</th>
-              <th className="num">Transitários</th>
-              <th className="num">Processos</th>
-              <th className="num">Em curso</th>
-              <th className="num">Concluídos</th>
-              <th className="num">Rejeit./cancel.</th>
-              <th className="num">Até conformidade</th>
-              <th className="num">Até concluir</th>
-              <th className="num">Faturado</th>
-              <th className="num">Cobrado</th>
-              <th className="num">Em aberto</th>
-              <th className="num">Atrasos</th>
-              <th className="num">Parados</th>
-              <th className="num">Saídas antec.</th>
+              <td>Total</td>
+              <td className="num">{t.processes}</td>
+              <td className="num">{t.inProgress}</td>
+              <td className="num">
+                {t.completed} · {pct(t.completed, t.processes)}
+              </td>
+              <td className="num">{fmtHours(t.avgHoursToComplete)}</td>
+              <td className="num">{money(amountIn(t.collected, currency), currency)}</td>
+              <td className="num">{moneyList(t.outstanding)}</td>
+              <td className="num">{alerts}</td>
+              <td className="num">{t.earlyReleases}</td>
             </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.entityId}>
-                <td className="nowrap">
-                  <strong>{r.name}</strong> {!r.active && <span className="tag">Inativo</span>}
-                </td>
-                <td className="num">{r.staff}</td>
-                <td className="num">{r.forwarders}</td>
-                <td className="num">{r.processes}</td>
-                <td className="num">{r.inProgress}</td>
-                <td className="num">{r.completed}</td>
-                <td className="num">{r.rejected + r.cancelled}</td>
-                <td className="num">{fmtHours(r.avgHoursToApproval)}</td>
-                <td className="num">{fmtHours(r.avgHoursToComplete)}</td>
-                <td className="num">{moneyList(r.invoiced)}</td>
-                <td className="num">{moneyList(r.collected)}</td>
-                <td className="num">{moneyList(r.outstanding)}</td>
-                <td className={r.overduePayments ? 'num red-text' : 'num'}>{r.overduePayments}</td>
-                <td className={r.stalled ? 'num red-text' : 'num'}>{r.stalled}</td>
-                <td className="num">
-                  {r.earlyReleases}
-                  {r.earlyReleases > 0 && <span className="muted small"> ({r.earlyReleasesUsed} usadas)</span>}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <p className="muted small">
-        Parados: há mais de {report.minHours} h no mesmo estado. Os valores contam só as proformas com valor indicado
-        {t.withoutAmount ? ` (${t.withoutAmount} sem valor ficam de fora)` : ''}. Para ver os processos de um terminal, use os outros separadores e escolha o terminal.
+          }
+        />
+      </Panel>
+      <p className="rpt-note">
+        Os valores contam só as proformas com valor indicado{t.withoutAmount ? ` (${t.withoutAmount} sem valor ficam de fora)` : ''}. Para ver os processos de um
+        terminal, abra o separador «Processos» e escolha o terminal.
       </p>
     </>
   )
 }
 
+// ---- Processos -------------------------------------------------------------------------------
 function ProcessesView({ report }) {
   const s = report.summary
-  const status = useMemo(() => Object.entries(s.byStatus).map(([k, v]) => ({ label: PROCESS_STATUS_LABELS[k] ?? k, value: v })).sort((a, b) => b.value - a.value), [s])
-  const priority = Object.entries(s.byPriority).map(([k, v]) => ({ label: PRIORITY_LABELS[k] ?? k, value: v })).sort((a, b) => b.value - a.value)
-  const volume = Object.entries(s.byVolume).map(([k, v]) => ({ label: VOLUME_LABELS[k] ?? k, value: v })).sort((a, b) => b.value - a.value)
+  const status = useMemo(
+    () =>
+      Object.entries(s.byStatus)
+        .map(([k, v]) => ({ label: PROCESS_STATUS_LABELS[k] ?? k, value: v }))
+        .sort((a, b) => b.value - a.value),
+    [s],
+  )
+  const groups = STATUS_GROUPS.map(([tone, label, list]) => ({ tone, label, value: list.reduce((n, k) => n + (s.byStatus[k] ?? 0), 0) }))
+  const priority = Object.entries(s.byPriority)
+    .map(([k, v]) => ({ label: PRIORITY_LABELS[k] ?? k, value: v }))
+    .sort((a, b) => b.value - a.value)
+  const volume = Object.entries(s.byVolume)
+    .map(([k, v]) => ({ label: VOLUME_LABELS[k] ?? k, value: v }))
+    .sort((a, b) => b.value - a.value)
+
+  const columns = [
+    { key: 'reference', label: 'Referência', render: refLink },
+    { key: 'forwarderName', label: 'Transitário', wrap: true },
+    { key: 'clientName', label: 'Cliente', wrap: true },
+    { key: 'cargoPriority', label: 'Carga', wrap: true, render: cargoTags, sort: (r) => PRIORITY_LABELS[r.cargoPriority] },
+    { key: 'status', label: 'Estado', render: (r) => <ProcessBadge status={r.status} />, sort: (r) => PROCESS_STATUS_LABELS[r.status], search: (r) => PROCESS_STATUS_LABELS[r.status] },
+    { key: 'submittedAt', label: 'Submetido', render: (r) => <span className="muted" title={formatDate(r.submittedAt)}>{shortDate(r.submittedAt)}</span>, sort: (r) => r.submittedAt, search: () => '' },
+    { key: 'hoursToApproval', label: 'Conformidade', num: true, render: (r) => fmtHours(r.hoursToApproval) },
+    { key: 'hoursToComplete', label: 'Conclusão', num: true, render: (r) => fmtHours(r.hoursToComplete) },
+    { key: 'amount', label: 'Proforma', num: true, render: (r) => (r.amount === null ? '—' : money(r.amount, r.currency)) },
+  ]
+
   return (
     <>
-      <div className="kpis">
-        <Kpi icon="clipboard" value={s.total} label="Processos no período" />
-        <Kpi icon="check" tone="green" value={s.completed} label="Concluídos" />
-        <Kpi icon="clock" tone="amber" value={s.active} label="Em curso" />
-        <Kpi icon="x" tone="red" value={s.cancelled + s.rejected} label="Cancelados e rejeitados" />
-        <Kpi icon="clock" value={fmtHours(s.avgHoursToApproval)} label="Tempo médio até conformidade" />
-        <Kpi icon="check" tone="green" value={fmtHours(s.avgHoursToComplete)} label="Tempo médio até concluir" />
+      <div className="rpt-stats">
+        <StatCard icon="clipboard" label="Processos" value={s.total} hint={`${s.urgent} com pedido de urgência`} />
+        <StatCard icon="check" tone="ok" label="Concluídos" value={s.completed} hint={`${pct(s.completed, s.total)} do período`}>
+          <Meter value={s.completed} total={s.total} label="Taxa de conclusão" />
+        </StatCard>
+        <StatCard icon="clock" label="Em curso" value={s.active} hint="Ainda sem conclusão" />
+        <StatCard icon="clock" label="Até conformidade" value={fmtHours(s.avgHoursToApproval)} hint="Tempo médio da submissão aos documentos conformes" />
+        <StatCard icon="check" label="Até concluir" value={fmtHours(s.avgHoursToComplete)} hint="Tempo médio da submissão à Factura/Recibo" />
+        <StatCard icon="x" tone={s.cancelled + s.rejected ? 'warn' : undefined} label="Rejeitados e cancelados" value={s.cancelled + s.rejected} hint={`${s.rejected} rejeitados · ${s.cancelled} cancelados`} />
       </div>
-      <div className="two-col">
-        <section className="card">
-          <h3>Por estado</h3>
-          <BarList items={status} />
-        </section>
-        <section className="card">
-          <h3>Por prioridade da carga</h3>
-          <BarList items={priority} tone="amber" />
-          <h3 style={{ marginTop: '1.25rem' }}>Por tipo de volume</h3>
-          <BarList items={volume} />
-        </section>
+
+      <Panel title="Onde estão os processos" subtitle="Passe o rato sobre a barra para ver cada grupo.">
+        <SegmentedBar parts={groups} />
+      </Panel>
+
+      <div className="rpt-grid-3">
+        <Panel title="Por estado">
+          <HBarChart items={status} />
+        </Panel>
+        <Panel title="Por carga">
+          <HBarChart items={priority} />
+          <h4 className="rpt-sub" style={{ margin: '1rem 0 .4rem' }}>
+            Por tipo de volume
+          </h4>
+          <HBarChart items={volume} />
+        </Panel>
       </div>
-      <section className="card">
-        <h3>Transitários com mais processos</h3>
-        <BarList items={s.byForwarder.map((f) => ({ label: f.name, value: f.total }))} tone="green" />
-      </section>
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Referência</th>
-              <th>Transitário</th>
-              <th>Cliente</th>
-              <th>Carga</th>
-              <th>Estado</th>
-              <th>Submetido</th>
-              <th className="num">Até conformidade</th>
-              <th className="num">Até concluir</th>
-              <th className="num">Proforma</th>
-            </tr>
-          </thead>
-          <tbody>
-            {report.rows.map((r) => (
-              <tr key={r.id}>
-                <td>
-                  <Link to={`/processos/${r.id}`}>{r.reference}</Link>
-                </td>
-                <td>{r.forwarderName}</td>
-                <td>{r.clientName}</td>
-                <td>
-                  {r.urgent && <span className="tag urgent">Urgente</span>}
-                  <span className={`tag prio-${r.cargoPriority}`}>{PRIORITY_LABELS[r.cargoPriority]}</span>
-                </td>
-                <td>
-                  <ProcessBadge status={r.status} />
-                </td>
-                <td className="muted">{formatDate(r.submittedAt)}</td>
-                <td className="num">{fmtHours(r.hoursToApproval)}</td>
-                <td className="num">{fmtHours(r.hoursToComplete)}</td>
-                <td className="num">{r.amount === null ? '—' : money(r.amount, r.currency)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {!report.rows.length && <Empty icon="chart">Sem processos no período.</Empty>}
-      </div>
-      {report.totalRows > report.rows.length && <p className="muted small">A mostrar {report.rows.length} de {report.totalRows} linhas: exporte o CSV para ver tudo.</p>}
+
+      <Panel title="Transitários com mais processos" subtitle="Os 10 primeiros no período">
+        <HBarChart items={s.byForwarder.map((f) => ({ label: f.name, value: f.total }))} />
+      </Panel>
+
+      <Panel className="flush" title="Processos do período">
+        <DataTable columns={columns} rows={report.rows} empty="Sem processos no período." />
+      </Panel>
+      {report.totalRows > report.rows.length && (
+        <p className="rpt-note">
+          A mostrar {report.rows.length} de {report.totalRows} processos: exporte o CSV para ver todos.
+        </p>
+      )}
     </>
   )
 }
 
+// ---- Receita ---------------------------------------------------------------------------------
 function RevenueView({ report }) {
   const currencies = report.totals
   const [currency, setCurrency] = useState(currencies[0]?.currency ?? 'AOA')
   const total = currencies.find((t) => t.currency === currency) ?? { invoiced: 0, collected: 0, outstanding: 0 }
   const series = report.series.filter((p) => p.currency === currency)
-  const max = Math.max(1, ...series.flatMap((p) => [p.invoiced, p.collected]))
   const top = report.topForwarders.filter((f) => f.currency === currency)
+
+  const columns = [
+    { key: 'reference', label: 'Referência', render: refLink },
+    { key: 'forwarderName', label: 'Transitário', wrap: true },
+    { key: 'proformaNumber', label: 'Proforma', render: (r) => r.proformaNumber ?? '—' },
+    { key: 'amount', label: 'Valor', num: true, render: (r) => (r.amount === null ? '—' : money(r.amount, r.currency)) },
+    { key: 'proformaIssuedAt', label: 'Emitida', render: (r) => <span className="muted" title={formatDate(r.proformaIssuedAt)}>{shortDate(r.proformaIssuedAt)}</span>, sort: (r) => r.proformaIssuedAt, search: () => '' },
+    {
+      key: 'paymentConfirmedAt',
+      label: 'Pagamento',
+      sort: (r) => r.paymentConfirmedAt ?? '',
+      search: (r) => (r.paymentConfirmedAt ? 'pago' : 'por cobrar'),
+      render: (r) =>
+        r.paymentConfirmedAt ? (
+          <span className="rpt-chip ok">
+            <Icon name="check" /> {shortDate(r.paymentConfirmedAt)}
+          </span>
+        ) : (
+          <span className="rpt-chip warn">
+            <Icon name="clock" /> Por cobrar
+          </span>
+        ),
+    },
+    { key: 'receiptNumber', label: 'Recibo', render: (r) => r.receiptNumber ?? '—' },
+  ]
+
   return (
     <>
       {currencies.length > 1 && (
-        <div className="filters no-print">
-          <select value={currency} onChange={(e) => setCurrency(e.target.value)} aria-label="Moeda">
+        <div className="rpt-toolbar no-print">
+          <div className="rpt-segmented" role="group" aria-label="Moeda">
             {currencies.map((t) => (
-              <option key={t.currency}>{t.currency}</option>
+              <button key={t.currency} className={currency === t.currency ? 'active' : ''} onClick={() => setCurrency(t.currency)}>
+                {t.currency}
+              </button>
             ))}
-          </select>
+          </div>
         </div>
       )}
       {report.withoutAmount > 0 && (
         <p className="notice">
-          <Icon name="alert" /> {report.withoutAmount} {report.withoutAmount === 1 ? 'proforma sem valor indicado ficou' : 'proformas sem valor indicado ficaram'} fora dos totais.
+          <Icon name="alert" /> {report.withoutAmount}{' '}
+          {report.withoutAmount === 1 ? 'proforma sem valor indicado ficou' : 'proformas sem valor indicado ficaram'} fora dos totais.
         </p>
       )}
-      <div className="kpis">
-        <Kpi icon="file" value={money(total.invoiced, currency)} money label="Faturado (proformas emitidas)" />
-        <Kpi icon="check" tone="green" value={money(total.collected, currency)} money label="Cobrado (pagamentos confirmados)" />
-        <Kpi icon="clock" tone="amber" value={money(total.outstanding, currency)} money label="Em aberto (faturado por cobrar)" />
+      <div className="rpt-stats">
+        <StatCard icon="file" label="Faturado" value={money(total.invoiced, currency)} hint="Proformas emitidas no período" />
+        <StatCard icon="check" tone="ok" label="Cobrado" value={money(total.collected, currency)} hint={`${pct(total.collected, total.invoiced)} do faturado · pagamentos confirmados`}>
+          <Meter value={Math.min(total.collected, total.invoiced)} total={total.invoiced} label="Cobrado sobre faturado" />
+        </StatCard>
+        <StatCard icon="clock" tone={total.outstanding ? 'warn' : undefined} label="Em aberto" value={money(total.outstanding, currency)} hint="Faturado no período ainda por cobrar" />
       </div>
-      <p className="muted small">Faturado e cobrado contam pela data da proforma e da confirmação do pagamento, respetivamente. Processos cancelados não entram.</p>
-      <div className="two-col">
-        <section className="card">
-          <h3>Evolução mensal</h3>
+
+      <div className="rpt-grid-3">
+        <Panel title="Evolução mensal" subtitle="Faturado pela data da proforma; cobrado pela data da confirmação">
           {series.length ? (
-            <>
-              <div className="columns" role="img" aria-label="Faturado e cobrado por mês">
-                {series.map((p) => (
-                  <div className="col-group" key={p.month}>
-                    <div className="col-bars">
-                      <div className="col" style={{ height: `${(p.invoiced / max) * 100}%` }} title={`Faturado: ${money(p.invoiced, currency)}`} />
-                      <div className="col green" style={{ height: `${(p.collected / max) * 100}%` }} title={`Cobrado: ${money(p.collected, currency)}`} />
-                    </div>
-                    <span className="col-label">{monthLabel(p.month)}</span>
-                  </div>
-                ))}
-              </div>
-              <div className="legend">
-                <span>
-                  <i />
-                  Faturado
-                </span>
-                <span>
-                  <i className="green" />
-                  Cobrado
-                </span>
-              </div>
-            </>
+            <ColumnPairChart
+              points={series}
+              labelOf={(p) => monthLabel(p.month)}
+              format={(v) => compactMoney(v, currency)}
+              series={[
+                { key: 'invoiced', label: 'Faturado' },
+                { key: 'collected', label: 'Cobrado' },
+              ]}
+            />
           ) : (
-            <p className="muted small">Sem movimentos no período.</p>
+            <p className="rpt-empty">Sem movimentos no período.</p>
           )}
-        </section>
-        <section className="card">
-          <h3>Cobrado por transitário</h3>
-          <BarList items={top.map((f) => ({ label: f.forwarder, value: f.collected }))} tone="green" format={(v) => money(v, currency)} />
-        </section>
+        </Panel>
+        <Panel title="Cobrado por transitário" subtitle="Os 10 primeiros">
+          <HBarChart items={top.map((f) => ({ label: f.forwarder, value: f.collected }))} format={(v) => compactMoney(v, currency)} />
+        </Panel>
       </div>
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Referência</th>
-              <th>Transitário</th>
-              <th>Proforma</th>
-              <th className="num">Valor</th>
-              <th>Emitida</th>
-              <th>Pagamento</th>
-              <th>Recibo</th>
-            </tr>
-          </thead>
-          <tbody>
-            {report.rows.map((r) => (
-              <tr key={r.id}>
-                <td>
-                  <Link to={`/processos/${r.id}`}>{r.reference}</Link>
-                </td>
-                <td>{r.forwarderName}</td>
-                <td>{r.proformaNumber}</td>
-                <td className="num">{r.amount === null ? '—' : money(r.amount, r.currency)}</td>
-                <td className="muted">{formatDate(r.proformaIssuedAt)}</td>
-                <td>{r.paymentConfirmedAt ? <span className="badge badge-APROVADO">{formatDate(r.paymentConfirmedAt)}</span> : <span className="badge badge-PENDENTE">Por cobrar</span>}</td>
-                <td>{r.receiptNumber ?? '—'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {!report.rows.length && <Empty icon="chart">Sem faturação no período.</Empty>}
-      </div>
+
+      <Panel className="flush" title="Proformas e pagamentos">
+        <DataTable columns={columns} rows={report.rows} empty="Sem faturação no período." />
+      </Panel>
+      <p className="rpt-note">Processos cancelados não entram nos totais.</p>
     </>
   )
 }
 
+// ---- Atrasos ---------------------------------------------------------------------------------
 function OverdueView({ report, onExport }) {
   const { payments, stalled } = report
   const owed = payments.owed.map((o) => money(o.amount, o.currency)).join(' + ') || money(0)
+  const waiting = Object.entries(stalled.byWaitingOn)
+    .map(([label, value]) => ({ label, value }))
+    .sort((a, b) => b.value - a.value)
+
+  const paymentColumns = [
+    { key: 'reference', label: 'Referência', render: refLink },
+    { key: 'forwarderName', label: 'Transitário', wrap: true },
+    { key: 'status', label: 'Estado', render: (r) => <ProcessBadge status={r.status} />, sort: (r) => PROCESS_STATUS_LABELS[r.status], search: (r) => PROCESS_STATUS_LABELS[r.status] },
+    { key: 'dueAt', label: 'Prazo', render: (r) => <span className="muted" title={formatDate(r.dueAt)}>{shortDate(r.dueAt)}</span>, search: () => '' },
+    {
+      key: 'hoursOverdue',
+      label: 'Em atraso',
+      num: true,
+      render: (r) => (
+        <span className="rpt-chip bad">
+          <Icon name="alert" /> {fmtHours(r.hoursOverdue)}
+        </span>
+      ),
+    },
+    { key: 'extensions', label: 'Prorrogações', num: true },
+    { key: 'amount', label: 'Valor', num: true, render: (r) => (r.amount === null ? '—' : money(r.amount, r.currency)) },
+  ]
+  const stalledColumns = [
+    { key: 'reference', label: 'Referência', render: refLink },
+    { key: 'forwarderName', label: 'Transitário', wrap: true },
+    { key: 'status', label: 'Estado', render: (r) => <ProcessBadge status={r.status} />, sort: (r) => PROCESS_STATUS_LABELS[r.status], search: (r) => PROCESS_STATUS_LABELS[r.status] },
+    { key: 'cargoPriority', label: 'Carga', wrap: true, render: cargoTags, sort: (r) => PRIORITY_LABELS[r.cargoPriority] },
+    { key: 'waitingOn', label: 'A aguardar' },
+    {
+      key: 'hoursWaiting',
+      label: 'Parado há',
+      num: true,
+      render: (r) => <span className={r.hoursWaiting >= 72 ? 'rpt-chip bad' : 'rpt-chip warn'}>{fmtHours(r.hoursWaiting)}</span>,
+    },
+  ]
+
   return (
     <>
-      <div className="kpis">
-        <Kpi icon="alert" tone="red" value={payments.count} label="Pagamentos em atraso" />
-        <Kpi icon="card" tone="red" value={owed} money label="Valor em dívida" />
-        <Kpi icon="clock" tone="amber" value={stalled.count} label={`Processos parados há mais de ${report.minHours} h`} />
+      <div className="rpt-stats">
+        <StatCard icon="alert" tone={payments.count ? 'bad' : 'ok'} label="Pagamentos em atraso" value={payments.count} hint="Saídas antecipadas com o prazo de pagamento vencido" />
+        <StatCard icon="card" tone={payments.count ? 'bad' : undefined} label="Valor em dívida" value={owed} />
+        <StatCard icon="clock" tone={stalled.count ? 'warn' : 'ok'} label="Processos parados" value={stalled.count} hint={`No mesmo estado há mais de ${report.minHours} h`} />
       </div>
 
-      <div className="page-head">
-        <div>
-          <h3 style={{ margin: 0 }}>Pagamentos em atraso</h3>
-          <p className="small">Cargas libertadas com compromisso de pagamento cujo prazo terminou.</p>
-        </div>
-        <div className="spacer no-print">
-          <button onClick={() => onExport('payments')}>
-            <Icon name="download" /> Exportar CSV
-          </button>
-        </div>
-      </div>
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Referência</th>
-              <th>Transitário</th>
-              <th>Estado</th>
-              <th>Prazo</th>
-              <th className="num">Em atraso</th>
-              <th className="num">Prorrogações</th>
-              <th className="num">Valor</th>
-            </tr>
-          </thead>
-          <tbody>
-            {payments.rows.map((r) => (
-              <tr key={r.id}>
-                <td>
-                  <Link to={`/processos/${r.id}`}>{r.reference}</Link>
-                </td>
-                <td>{r.forwarderName}</td>
-                <td>
-                  <ProcessBadge status={r.status} />
-                </td>
-                <td className="muted">{formatDate(r.dueAt)}</td>
-                <td className="num">
-                  <span className="tag urgent">{fmtHours(r.hoursOverdue)}</span>
-                </td>
-                <td className="num">{r.extensions}</td>
-                <td className="num">{r.amount === null ? '—' : money(r.amount, r.currency)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {!payments.rows.length && <Empty icon="check">Sem pagamentos em atraso.</Empty>}
+      <div className="rpt-grid-3">
+        <Panel
+          className="flush"
+          title="Pagamentos em atraso"
+          subtitle="Cargas libertadas com compromisso de pagamento cujo prazo terminou."
+          actions={
+            <button onClick={() => onExport('payments')}>
+              <Icon name="download" /> CSV
+            </button>
+          }
+        >
+          <DataTable columns={paymentColumns} rows={payments.rows} initialSort={{ key: 'hoursOverdue', dir: 'desc' }} empty="Sem pagamentos em atraso." pageSize={10} />
+        </Panel>
+        <Panel title="Quem tem de agir" subtitle="Processos parados, por responsável">
+          <HBarChart items={waiting} empty="Nenhum processo parado." />
+        </Panel>
       </div>
 
-      <div className="page-head" style={{ marginTop: '1.5rem' }}>
-        <div>
-          <h3 style={{ margin: 0 }}>Processos parados</h3>
-          <p className="small">Quem tem de agir: {Object.entries(stalled.byWaitingOn).map(([k, v]) => `${k} (${v})`).join(' · ') || 'ninguém'}.</p>
-        </div>
-        <div className="spacer no-print">
+      <Panel
+        className="flush"
+        title="Processos parados"
+        subtitle="Ordenados pelo tempo parado."
+        actions={
           <button onClick={() => onExport('stalled')}>
-            <Icon name="download" /> Exportar CSV
+            <Icon name="download" /> CSV
           </button>
-        </div>
-      </div>
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Referência</th>
-              <th>Transitário</th>
-              <th>Estado</th>
-              <th>Carga</th>
-              <th>A aguardar</th>
-              <th className="num">Parado há</th>
-            </tr>
-          </thead>
-          <tbody>
-            {stalled.rows.map((r) => (
-              <tr key={r.id}>
-                <td>
-                  <Link to={`/processos/${r.id}`}>{r.reference}</Link>
-                </td>
-                <td>{r.forwarderName}</td>
-                <td>
-                  <ProcessBadge status={r.status} />
-                </td>
-                <td>
-                  {r.urgent && <span className="tag urgent">Urgente</span>}
-                  <span className={`tag prio-${r.cargoPriority}`}>{PRIORITY_LABELS[r.cargoPriority]}</span>
-                </td>
-                <td>{r.waitingOn}</td>
-                <td className="num">{fmtHours(r.hoursWaiting)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {!stalled.rows.length && <Empty icon="check">Nenhum processo parado.</Empty>}
-      </div>
+        }
+      >
+        <DataTable columns={stalledColumns} rows={stalled.rows} initialSort={{ key: 'hoursWaiting', dir: 'desc' }} empty="Nenhum processo parado." />
+      </Panel>
     </>
   )
 }
