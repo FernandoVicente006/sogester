@@ -21,12 +21,14 @@ const NUMERIC_FIELDS = ['weightKg', 'packagesCount']
 
 /** Documentos que o transitário pode enviar (os de faturação entram pelos seus próprios passos). */
 export const UPLOADABLE_LABELS = {
-  BILHETE: 'Bilhete de identidade',
-  ALVARA: 'Alvará comercial',
-  GUIA_CABOTAGEM: 'Guia de cabotagem',
-  BL: 'BL',
   EP17: 'EP17',
   EP15: 'EP15',
+  RECIBO_EP: 'Recibo do EP',
+  DOCUMENTOS: 'Documentação',
+  ALVARA: 'Alvará comercial',
+  BILHETE: 'Bilhete de identidade',
+  GUIA_CABOTAGEM: 'Guia de cabotagem',
+  BL: 'BL',
   OUTRO: 'Outro',
 }
 
@@ -94,7 +96,7 @@ export function RequestCorrections({ process, documents, onClose, onSubmit }) {
 
         <div className="items-head">
           <h4>Documentos em falta</h4>
-          <button type="button" onClick={() => setMissing([...missing, { documentKind: 'ALVARA', reason: '' }])}>
+          <button type="button" onClick={() => setMissing([...missing, { documentKind: 'OUTRO', reason: '' }])}>
             <Icon name="plus" /> Documento
           </button>
         </div>

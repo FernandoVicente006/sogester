@@ -6,7 +6,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
-import { CARGO_PRIORITIES, CONTAINER_SIZES, DISCHARGE_TYPES, REGIMES, UNITS, UPLOADABLE_KINDS, VOLUME_TYPES, cargoCatalog } from '../cargo.js';
+import { CARGO_PRIORITIES, CONTAINER_SIZES, DISCHARGE_TYPES, OPERATIONS, REGIMES, UNITS, UPLOADABLE_KINDS, VOLUME_TYPES, cargoCatalog } from '../cargo.js';
 import { badRequest, forbidden } from '../errors.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
@@ -101,6 +101,7 @@ const schemas = {
       email: email.optional(),
       address: z.string().trim().max(255).optional(),
     }),
+    operation: z.enum(Object.keys(OPERATIONS)),
     cargoPriority: z.enum(Object.keys(CARGO_PRIORITIES)),
     volumeType: z.enum(Object.keys(VOLUME_TYPES)),
     cargoCategory: text(100).optional(),
@@ -201,14 +202,13 @@ const schemas = {
 
 // ---- upload de documentos de processos (privados) ------------------------------------------
 const DOC_TYPES = { 'application/pdf': '.pdf', 'image/png': '.png', 'image/jpeg': '.jpg' };
+// Na criação: o EP da operação, o seu recibo, a documentação da JUP (vários ficheiros) e outros.
 const DOC_FIELDS = {
-  bilhete: 'BILHETE',
-  alvara: 'ALVARA',
-  guiaCabotagem: 'GUIA_CABOTAGEM',
-  bl: 'BL',
-  ep17: 'EP17',
-  ep15: 'EP15',
-  outros: 'OUTRO',
+  ep17: { kind: 'EP17', max: 1 },
+  ep15: { kind: 'EP15', max: 1 },
+  reciboEp: { kind: 'RECIBO_EP', max: 1 },
+  documentos: { kind: 'DOCUMENTOS', max: 10 },
+  outros: { kind: 'OUTRO', max: 5 },
 };
 fs.mkdirSync(processes.documentsDir, { recursive: true });
 const docUpload = multer({
@@ -216,7 +216,7 @@ const docUpload = multer({
     destination: processes.documentsDir,
     filename: (_req, file, cb) => cb(null, `${crypto.randomUUID()}${DOC_TYPES[file.mimetype]}`),
   }),
-  limits: { fileSize: 10 * 1024 * 1024, files: 12 },
+  limits: { fileSize: 10 * 1024 * 1024, files: 18 },
   fileFilter: (_req, file, cb) =>
     DOC_TYPES[file.mimetype] ? cb(null, true) : cb(badRequest('Documentos devem ser PDF, PNG ou JPG', 'INVALID_FILE_TYPE')),
 });
@@ -374,9 +374,9 @@ v1.post(
   '/processes',
   authenticate,
   requireRole(TRANSITARIO),
-  docUpload.fields(Object.entries(DOC_FIELDS).map(([name]) => ({ name, maxCount: name === 'outros' ? 5 : 1 }))),
+  docUpload.fields(Object.entries(DOC_FIELDS).map(([name, { max }]) => ({ name, maxCount: max }))),
   async (req, res) => {
-    const files = Object.entries(req.files ?? {}).flatMap(([field, list]) => list.map((file) => ({ kind: DOC_FIELDS[field], file })));
+    const files = Object.entries(req.files ?? {}).flatMap(([field, list]) => list.map((file) => ({ kind: DOC_FIELDS[field].kind, file })));
     try {
       let raw;
       try {

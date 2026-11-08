@@ -43,7 +43,7 @@ function submission(extra = {}) {
     JSON.stringify({
       entityId: 1,
       client: { type: 'SINGULAR', name: 'João', documentNumber: '004567890LA041' },
-      cargoPriority: 'NAO_PRIORITARIO',
+      operation: 'DESEMBARQUE', cargoPriority: 'NAO_PRIORITARIO',
       volumeType: 'CARGA_GERAL',
       cargoCategory: 'Mercadoria fracionada',
       description: 'Caixas',
@@ -58,7 +58,8 @@ function submission(extra = {}) {
     }),
   );
   fd.append('ep17', PDF(), 'ep17.pdf');
-  fd.append('bilhete', PDF(), 'bilhete.pdf');
+  fd.append('reciboEp', PDF(), 'recibo.pdf');
+  fd.append('documentos', PDF(), 'documentos.pdf');
   return fd;
 }
 

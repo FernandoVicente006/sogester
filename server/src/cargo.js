@@ -59,6 +59,12 @@ export const VOLUME_TYPES = {
 /** Veículos só precisam de marca e modelo. */
 export const isVehicleCategory = (category) => typeof category === 'string' && category.startsWith('Veículos');
 
+/** Operação do processo e o EP do porto que lhe corresponde. */
+export const OPERATIONS = {
+  DESEMBARQUE: { label: 'Desembarque', ep: 'EP17' },
+  EMBARQUE: { label: 'Embarque', ep: 'EP15' },
+};
+
 export const DOCUMENT_KINDS = {
   BILHETE: 'Bilhete de identidade',
   ALVARA: 'Alvará comercial',
@@ -66,6 +72,8 @@ export const DOCUMENT_KINDS = {
   BL: 'BL (Bill of Lading)',
   EP17: 'EP17 (retirada de carga)',
   EP15: 'EP15 (embarque de carga)',
+  RECIBO_EP: 'Recibo do EP',
+  DOCUMENTOS: 'Documentação (Guia, BL, Alvará…)',
   OUTRO: 'Outro',
   PROFORMA: 'Fatura proforma',
   COMPROVATIVO: 'Comprovativo de pagamento',
@@ -73,7 +81,7 @@ export const DOCUMENT_KINDS = {
 };
 
 /** Tipos que o transitário pode anexar livremente; os de faturação só entram pelos seus próprios passos. */
-export const UPLOADABLE_KINDS = ['BILHETE', 'ALVARA', 'GUIA_CABOTAGEM', 'BL', 'EP17', 'EP15', 'OUTRO'];
+export const UPLOADABLE_KINDS = ['EP17', 'EP15', 'RECIBO_EP', 'DOCUMENTOS', 'BILHETE', 'ALVARA', 'GUIA_CABOTAGEM', 'BL', 'OUTRO'];
 
 /** Regimes aduaneiros (como na nota de desalfandegamento da JUP). */
 export const REGIMES = {
@@ -102,6 +110,7 @@ export const UNITS = ['Unidade', 'Quilograma', 'Tonelada', 'Caixa', 'Saco', 'Pal
 export function cargoCatalog() {
   return {
     regimes: Object.entries(REGIMES).map(([value, label]) => ({ value, label: `${value} | ${label}` })),
+    operations: Object.entries(OPERATIONS).map(([value, { label, ep }]) => ({ value, label, ep })),
     dischargeTypes: Object.entries(DISCHARGE_TYPES).map(([value, label]) => ({ value, label })),
     containerSizes: CONTAINER_SIZES,
     units: UNITS,

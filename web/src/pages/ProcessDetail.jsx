@@ -3,7 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { api, errorText } from '../api.js'
 import { useAuth } from '../auth.jsx'
 import Chat from '../components/Chat.jsx'
-import { CorrectionsToDo, RequestCorrections, UPLOADABLE_LABELS, openIssues } from '../components/Corrections.jsx'
+import { CorrectionsToDo, RequestCorrections, openIssues } from '../components/Corrections.jsx'
 import Viewer, { DocumentPane } from '../components/Viewer.jsx'
 import { ErrorBox, Field, Icon, Modal, PRIORITY_LABELS, PROCESS_STATUS_LABELS, ProcessBadge, formatDate } from '../components/ui.jsx'
 
@@ -49,6 +49,8 @@ const DOC_LABELS = {
   BL: 'BL',
   EP17: 'EP17',
   EP15: 'EP15',
+  RECIBO_EP: 'Recibo do EP',
+  DOCUMENTOS: 'Documentação',
   OUTRO: 'Outro',
   PROFORMA: 'Fatura proforma',
   COMPROVATIVO: 'Comprovativo de pagamento',
@@ -103,7 +105,6 @@ export default function ProcessDetail() {
   const [p, setP] = useState(null)
   const [error, setError] = useState('')
   const [notes, setNotes] = useState('')
-  const [docKind, setDocKind] = useState('OUTRO')
   const [docFile, setDocFile] = useState(null)
   const [requesting, setRequesting] = useState(false)
 
@@ -190,7 +191,7 @@ export default function ProcessDetail() {
     e.preventDefault()
     if (!docFile) return
     const form = new FormData()
-    form.append('kind', docKind)
+    form.append('kind', 'OUTRO')
     form.append('file', docFile)
     run(() => api('POST', `/processes/${id}/documents`, { form }))
     setDocFile(null)
@@ -269,6 +270,7 @@ export default function ProcessDetail() {
             <Icon name="truck" /> Transporte
           </h3>
           <dl className="details">
+            {p.operation && row('Operação', p.operation === 'EMBARQUE' ? 'Embarque (EP15)' : 'Desembarque (EP17)')}
             {row('N.º do B/L', p.blNumber)}
             {row('N.º do DU', p.duNumber)}
             {row('Navio / viagem', `${p.vesselName} · ${p.voyageNumber}`)}
@@ -680,16 +682,7 @@ export default function ProcessDetail() {
         {isForwarder && p.status === 'DOCUMENTOS_PENDENTES' && (
           <>
             <form onSubmit={upload} className="row end">
-              <Field label="Tipo">
-                <select value={docKind} onChange={(e) => setDocKind(e.target.value)}>
-                  {Object.entries(UPLOADABLE_LABELS).map(([k, v]) => (
-                    <option key={k} value={k}>
-                      {v}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Ficheiro">
+              <Field label="Outros documentos (pedidos pela Sogester)">
                 <input type="file" accept="application/pdf,image/png,image/jpeg" onChange={(e) => setDocFile(e.target.files[0])} required />
               </Field>
               <button>Anexar</button>

@@ -41,7 +41,7 @@ function form(data, files) {
 const cargo = (extra = {}) => ({
   entityId: 1,
   client: { type: 'SINGULAR', name: 'João Silva', documentNumber: '004567890LA041' },
-  cargoPriority: 'NAO_PRIORITARIO',
+  operation: 'DESEMBARQUE', cargoPriority: 'NAO_PRIORITARIO',
   volumeType: 'CARGA_GERAL',
   cargoCategory: 'Mercadoria fracionada',
   description: 'Caixas de roupa',
@@ -101,7 +101,7 @@ test('fluxo normal, proforma, comprovativo, fatura recibo e saída antecipada', 
   const fwdB = await mkForwarder(2);
 
   const submit = async (token, extra) => {
-    const r = await api('POST', '/processes', { token, form: form(cargo(extra), ['ep17', 'bilhete']) });
+    const r = await api('POST', '/processes', { token, form: form(cargo(extra), ['ep17', 'reciboEp', 'documentos']) });
     assert.equal(r.status, 201, JSON.stringify(r.body));
     return r.body.process;
   };

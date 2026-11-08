@@ -88,7 +88,7 @@ test('chat por processo: acesso, anexos, não lidas e encerramento', async () =>
     JSON.stringify({
       entityId: 1,
       client: { type: 'SINGULAR', name: 'João', documentNumber: '004567890LA041' },
-      cargoPriority: 'NAO_PRIORITARIO',
+      operation: 'DESEMBARQUE', cargoPriority: 'NAO_PRIORITARIO',
       volumeType: 'CARGA_GERAL',
       cargoCategory: 'Mercadoria fracionada',
       description: 'Caixas',
@@ -102,7 +102,8 @@ test('chat por processo: acesso, anexos, não lidas e encerramento', async () =>
     }),
   );
   fd.append('ep17', PDF(), 'ep17.pdf');
-  fd.append('bilhete', PDF(), 'bilhete.pdf');
+  fd.append('reciboEp', PDF(), 'recibo.pdf');
+  fd.append('documentos', PDF(), 'documentos.pdf');
   const p = (await api('POST', '/processes', { token: fwdA, form: fd })).body.process;
   const base_ = `/processes/${p.id}/messages`;
   assert.equal((await api('GET', `${base_}?after=0`, { token: fwdA })).status, 200, 'conversa vazia: a atualização periódica usa after=0');

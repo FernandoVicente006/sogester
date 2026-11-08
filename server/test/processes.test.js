@@ -39,7 +39,7 @@ const login = async (email, password) => (await api('POST', '/auth/login', { bod
 const PDF = () => new Blob(['%PDF-1.4 teste'], { type: 'application/pdf' });
 const docCount = () => fs.readdirSync(documentsDir).length;
 
-function form(data, fileFields = ['ep17', 'bilhete']) {
+function form(data, fileFields = ['ep17', 'reciboEp', 'documentos']) {
   const fd = new FormData();
   fd.append('data', JSON.stringify(data));
   for (const f of fileFields) fd.append(f, PDF(), `${f}.pdf`);
@@ -49,7 +49,7 @@ function form(data, fileFields = ['ep17', 'bilhete']) {
 const cargo = (extra = {}) => ({
   entityId: 1,
   client: { type: 'SINGULAR', name: 'João Silva', documentNumber: '004567890LA041' },
-  cargoPriority: 'NAO_PRIORITARIO',
+  operation: 'DESEMBARQUE', cargoPriority: 'NAO_PRIORITARIO',
   volumeType: 'CARGA_GERAL',
   cargoCategory: 'Mercadoria fracionada',
   description: 'Caixas de roupa',
@@ -115,7 +115,8 @@ test('submissão, fila, estados e documentos de processos', async () => {
   const p1 = created.body.process;
   assert.equal(p1.status, 'SUBMETIDO');
   assert.match(p1.reference, /^CAB-\d{4}-\d{6}$/);
-  assert.equal(p1.documents.length, 2);
+  assert.equal(p1.documents.length, 3);
+  assert.equal(p1.operation, 'DESEMBARQUE');
   assert.equal(p1.history.length, 1);
 
   // cliente reconhecido pelo documento
@@ -126,7 +127,7 @@ test('submissão, fila, estados e documentos de processos', async () => {
 
   // --- validações (não podem deixar ficheiros órfãos)
   const before = docCount();
-  const noEp = await api('POST', '/processes', { token: fwdA, form: form(cargo(), ['bilhete']) });
+  const noEp = await api('POST', '/processes', { token: fwdA, form: form(cargo(), ['reciboEp', 'documentos']) });
   assert.equal(noEp.status, 400);
   assert.ok(noEp.body.error.details.some((d) => d.message.includes('EP17')));
   const noId = await api('POST', '/processes', { token: fwdA, form: form(cargo(), ['ep17']) });
@@ -203,14 +204,14 @@ test('submissão, fila, estados e documentos de processos', async () => {
   assert.equal(repeated.status, 400);
   const foreign = await api('POST', '/processes', {
     token: fwdA,
-    form: form(cargo({ client: { type: 'EMPRESA', name: 'Foreign Ltd', documentNumber: 'PT500100200', isForeign: true } }), ['ep15']),
+    form: form(cargo({ client: { type: 'EMPRESA', name: 'Foreign Ltd', documentNumber: 'PT500100200', isForeign: true }, operation: 'EMBARQUE' }), ['ep15', 'reciboEp', 'documentos']),
   });
   assert.equal(foreign.status, 201, JSON.stringify(foreign.body));
-  const empresaNoAlvara = await api('POST', '/processes', {
+  const wrongEp = await api('POST', '/processes', {
     token: fwdA,
-    form: form(cargo({ client: { type: 'EMPRESA', name: 'Local Lda', documentNumber: '5400000001' } }), ['ep17']),
+    form: form(cargo({ client: { type: 'EMPRESA', name: 'Local Lda', documentNumber: '5400000001' } }), ['ep15', 'reciboEp', 'documentos']),
   });
-  assert.equal(empresaNoAlvara.status, 400);
+  assert.equal(wrongEp.status, 400, 'desembarque não aceita o EP15');
 
   // --- permissões de submissão
   assert.equal((await api('POST', '/processes', { token: fwdPending, form: form(cargo()) })).status, 403);

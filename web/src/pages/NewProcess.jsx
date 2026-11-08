@@ -100,6 +100,7 @@ export default function NewProcess() {
   const [busy, setBusy] = useState(false)
 
   const [entityId, setEntityId] = useState('')
+  const [operation, setOperation] = useState('')
   const [client, setClient] = useState(EMPTY_CLIENT)
   const [cargoPriority, setCargoPriority] = useState('NAO_PRIORITARIO')
   const [volumeType, setVolumeType] = useState('CARGA_GERAL')
@@ -130,6 +131,13 @@ export default function NewProcess() {
   const setC = (k) => (e) => setClient((c) => ({ ...c, [k]: e.target.value }))
   const setT = (k) => (e) => setTransport((t) => ({ ...t, [k]: e.target.value }))
   const setFile = (k) => (e) => setFiles((f) => ({ ...f, [k]: e.target.files }))
+  const ep = meta?.operations.find((o) => o.value === operation)?.ep
+
+  // Ao trocar a operação, o EP anexado da outra operação deixa de valer.
+  function chooseOperation(value) {
+    setOperation(value)
+    setFiles(({ ep17, ep15, ...rest }) => rest)
+  }
 
   // Ao escolher o tipo principal, abre a lista que ele exige (as outras continuam disponíveis).
   function chooseVolume(value) {
@@ -164,6 +172,7 @@ export default function NewProcess() {
     setBusy(true)
     const data = {
       entityId: Number(entityId),
+      operation,
       client: clean({ ...client, isForeign: client.type === 'EMPRESA' ? client.isForeign : undefined }),
       cargoPriority,
       volumeType,
@@ -207,9 +216,10 @@ export default function NewProcess() {
     )
   }
 
-  const docInput = (field, label, multiple = false) => (
+  const docInput = (field, label, { multiple = false, required = false, hint } = {}) => (
     <Field label={label}>
-      <input type="file" accept="application/pdf,image/png,image/jpeg" multiple={multiple} onChange={setFile(field)} />
+      <input key={field} type="file" accept="application/pdf,image/png,image/jpeg" multiple={multiple} onChange={setFile(field)} required={required} />
+      {hint && <span className="muted small">{hint}</span>}
     </Field>
   )
   const unitOptions = meta.units.map((u) => [u, u])
@@ -220,7 +230,8 @@ export default function NewProcess() {
       <PageHeader title="Novo processo" subtitle="Cadastre o cliente, o transporte e a carga, e anexe a documentação exigida." />
       <form onSubmit={submit} className="stack">
         <section className="card stack">
-          <h3>Terminal</h3>
+          <h3>Terminal e operação</h3>
+          <div className="row">
           <Field label="Terminal de destino">
             <select value={entityId} onChange={(e) => setEntityId(e.target.value)}>
               {terminals.map((t) => (
@@ -230,6 +241,17 @@ export default function NewProcess() {
               ))}
             </select>
           </Field>
+          <Field label="Operação">
+            <div className="choice">
+              {meta.operations.map((o) => (
+                <label key={o.value} className={operation === o.value ? 'on' : ''}>
+                  <input type="radio" name="operation" value={o.value} checked={operation === o.value} onChange={() => chooseOperation(o.value)} required />
+                  {o.label} <span className="muted small">({o.ep})</span>
+                </label>
+              ))}
+            </div>
+          </Field>
+          </div>
         </section>
 
         <section className="card stack">
@@ -444,22 +466,25 @@ export default function NewProcess() {
         </section>
 
         <section className="card stack">
-          <h3>Documentos (PDF, PNG ou JPG, até 10 MB)</h3>
-          <p className="muted small">
-            Obrigatório: EP17 ou EP15 do porto; {client.type === 'SINGULAR' ? 'bilhete de identidade' : client.isForeign ? 'alvará dispensado (empresa estrangeira)' : 'alvará comercial'}.
-          </p>
-          <div className="row">
-            {docInput('ep17', 'EP17 (retirada)')}
-            {docInput('ep15', 'EP15 (embarque)')}
-          </div>
-          <div className="row">
-            {client.type === 'SINGULAR' ? docInput('bilhete', 'Bilhete de identidade') : docInput('alvara', 'Alvará comercial')}
-            {docInput('guiaCabotagem', 'Guia de cabotagem (se houver)')}
-          </div>
-          <div className="row">
-            {docInput('bl', 'BL (se houver)')}
-            {docInput('outros', 'Outros (até 5)', true)}
-          </div>
+          <h3>Documentos (PDF, PNG ou JPG, até 10 MB cada)</h3>
+          {!ep ? (
+            <p className="muted">Escolha primeiro a operação (desembarque ou embarque), no topo.</p>
+          ) : (
+            <>
+              <div className="row">
+                {docInput(ep.toLowerCase(), `${ep} do porto`, { required: true })}
+                {docInput('reciboEp', `Recibo do ${ep}`, { required: true })}
+              </div>
+              {docInput('documentos', 'Documentação', {
+                multiple: true,
+                required: true,
+                hint: 'A mesma documentação enviada na JUP: Guia, BL, Alvará ou bilhete, etc. Pode escolher vários ficheiros de uma vez (até 10).',
+              })}
+              <p className="muted small">
+                Se, na análise, a Sogester pedir um documento em falta, envia-o depois no próprio processo, em «Outros».
+              </p>
+            </>
+          )}
         </section>
 
         <ErrorBox message={error} />

@@ -74,7 +74,7 @@ code { font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace; font-siz
 .icon-btn { background: none; border: 0; color: #9fb4ca; padding: .4rem; min-height: 0; border-radius: 6px; cursor: pointer; display: grid; place-items: center; }
 .icon-btn:hover { color: #fff; background: rgb(255 255 255 / .1); }
 .menu-toggle { display: none; }
-main { padding: 1.75rem 2rem 3rem; max-width: 1180px; width: 100%; min-width: 0; }
+main { padding: 1.75rem 2.25rem 3rem; max-width: 1640px; width: 100%; min-width: 0; }
 
 .page-head { display: flex; align-items: flex-end; gap: 1rem; margin-bottom: 1.25rem; flex-wrap: wrap; }
 .page-head h2 { margin: 0; font-size: 1.5rem; }
@@ -382,3 +382,9 @@ input[type='file']::file-selector-button:hover { background: var(--brand-100); }
 
 .kpi > div { min-width: 0; }
 .kpi-value.money { font-size: 1.15rem; line-height: 1.25; }
+
+/* Escolha em botões (operação do processo) */
+.choice { display: flex; gap: .5rem; flex-wrap: wrap; }
+.choice label { display: flex; align-items: center; gap: .45rem; padding: .55rem .9rem; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; font-weight: 500; color: var(--text); background: var(--surface); }
+.choice label.on { border-color: var(--brand-600); background: rgb(4 107 210 / .07); }
+.choice input { margin: 0; }

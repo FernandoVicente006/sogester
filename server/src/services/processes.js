@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { pool, query, queryOne, withTransaction } from '../db/pool.js';
 import { badRequest, conflict, forbidden, notFound } from '../errors.js';
-import { CARGO_PRIORITIES, DOCUMENT_KINDS, UPLOADABLE_KINDS, VOLUME_TYPES, isVehicleCategory } from '../cargo.js';
+import { CARGO_PRIORITIES, DOCUMENT_KINDS, OPERATIONS, UPLOADABLE_KINDS, VOLUME_TYPES, isVehicleCategory } from '../cargo.js';
 import { ROLES, isForwarder, isSuperAdmin } from '../roles.js';
 import { audit } from './audit.js';
 import { isApprovedIn } from './forwarders.js';
@@ -45,7 +45,7 @@ export const ARCHIVED_STATUSES = ['CONCLUIDO', 'REJEITADO', 'CANCELADO'];
 const SELECT = `
   SELECT p.id, p.reference, p.entity_id AS entityId, e.code AS entityCode, p.forwarder_id AS forwarderId,
          f.name AS forwarderName, p.status, p.status_notes AS statusNotes,
-         p.cargo_priority AS cargoPriority, p.priority_rank AS priorityRank,
+         p.operation, p.cargo_priority AS cargoPriority, p.priority_rank AS priorityRank,
          p.urgency_requested AS urgencyRequested, p.urgency_reason AS urgencyReason,
          p.volume_type AS volumeType, p.cargo_category AS cargoCategory, p.description, p.weight_kg AS weightKg,
          p.bl_number AS blNumber, p.du_number AS duNumber, p.vessel_name AS vesselName, p.voyage_number AS voyageNumber,
@@ -135,16 +135,16 @@ function validateCargo(input) {
   return errors;
 }
 
-function validateDocuments(client, kinds) {
+/** Desembarque leva o EP17, embarque o EP15; cada um com o seu recibo e a documentação enviada na JUP. */
+function validateDocuments(operation, kinds) {
   const errors = [];
-  if (!kinds.has('EP17') && !kinds.has('EP15')) errors.push({ field: 'documents', message: 'EP17 ou EP15 do porto é obrigatório' });
-  if (client.type === 'SINGULAR' && !kinds.has('BILHETE')) {
-    errors.push({ field: 'documents', message: 'Cópia do bilhete de identidade é obrigatória' });
-  }
-  // Empresa estrangeira sem alvará: o transitário assume a responsabilidade com o seu NIF.
-  if (client.type === 'EMPRESA' && !client.isForeign && !kinds.has('ALVARA')) {
-    errors.push({ field: 'documents', message: 'Alvará comercial é obrigatório para empresas' });
-  }
+  const need = (ok, message) => !ok && errors.push({ field: 'documents', message });
+  const { ep, label } = OPERATIONS[operation];
+  const other = ep === 'EP17' ? 'EP15' : 'EP17';
+  need(kinds.has(ep), `${ep} do porto é obrigatório no ${label.toLowerCase()}`);
+  need(!kinds.has(other), `O ${other} não corresponde a um ${label.toLowerCase()}`);
+  need(kinds.has('RECIBO_EP'), `Recibo do ${ep} é obrigatório`);
+  need(kinds.has('DOCUMENTOS'), 'Anexe a documentação (Guia, BL, Alvará, etc.)');
   return errors;
 }
 
@@ -153,7 +153,7 @@ function validateDocuments(client, kinds) {
 export async function createProcess(actor, input, files) {
   if (!isForwarder(actor)) throw forbidden('Apenas transitários submetem processos');
 
-  const errors = [...validateCargo(input), ...validateDocuments(input.client, new Set(files.map((f) => f.kind)))];
+  const errors = [...validateCargo(input), ...validateDocuments(input.operation, new Set(files.map((f) => f.kind)))];
   if (errors.length) throw badRequest('Dados inválidos', 'VALIDATION_ERROR', errors);
 
   const entity = await queryOne('SELECT id, code, active FROM entities WHERE id = ?', [input.entityId]);
@@ -176,13 +176,13 @@ export async function createProcess(actor, input, files) {
     );
 
     const [res] = await conn.query(
-      `INSERT INTO processes (entity_id, forwarder_id, client_id, created_by, cargo_priority, priority_rank,
+      `INSERT INTO processes (entity_id, forwarder_id, client_id, created_by, operation, cargo_priority, priority_rank,
          urgency_requested, urgency_reason, volume_type, cargo_category, description, weight_kg,
          bl_number, du_number, vessel_name, voyage_number, discharge_type, regime, manifest_number, packages_count,
          origin_country, destination_country)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        entity.id, actor.forwarderId, cl.insertId, actor.id, input.cargoPriority, CARGO_PRIORITIES[input.cargoPriority].rank,
+        entity.id, actor.forwarderId, cl.insertId, actor.id, input.operation, input.cargoPriority, CARGO_PRIORITIES[input.cargoPriority].rank,
         input.urgencyRequested ? 1 : 0, input.urgencyReason ?? null, input.volumeType, input.cargoCategory ?? null,
         input.description ?? null, input.weightKg, input.blNumber, input.duNumber, input.vesselName, input.voyageNumber,
         input.dischargeType, input.regime ?? null, input.manifestNumber ?? null, input.packagesCount ?? null,
