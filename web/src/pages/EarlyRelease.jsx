@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import QRCode from 'qrcode'
-import { api, errorText } from '../api.js'
+import { api, errorText, isLocalOnly, publicOrigin } from '../api.js'
 import { ErrorBox, Icon, formatDate } from '../components/ui.jsx'
 
 /** Autorização de saída antecipada para imprimir: o QR Code abre a verificação, que a portaria confirma no sistema. */
@@ -17,7 +17,7 @@ export default function EarlyRelease() {
       .catch((err) => setError(errorText(err)))
   }, [id])
 
-  const verifyUrl = p?.authorization ? `${window.location.origin}/verificar/${p.authorization.code}` : ''
+  const verifyUrl = p?.authorization ? `${publicOrigin()}/verificar/${p.authorization.code}` : ''
   useEffect(() => {
     if (!verifyUrl) return
     QRCode.toDataURL(verifyUrl, { margin: 1, width: 300, errorCorrectionLevel: 'M' })
@@ -51,6 +51,12 @@ export default function EarlyRelease() {
           </button>
         </div>
       </div>
+      {isLocalOnly() && (
+        <p className="notice no-print">
+          O QR Code aponta para «{publicOrigin()}», que só abre neste computador. Para o ler com o telemóvel, defina VITE_PUBLIC_URL em
+          web/.env.local com o endereço da rede (ex.: http://172.20.10.10:5173) ou abra a plataforma por esse endereço.
+        </p>
+      )}
       <article className="release-doc">
         <header>
           <div>

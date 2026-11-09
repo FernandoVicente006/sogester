@@ -27,6 +27,11 @@ Os dados de desenvolvimento ficam intactos e o ensaio pode ser apagado no fim.
 3. **Inicializar o administrador geral**: abrir `http://localhost:5173/setup`, indicar o `SETUP_TOKEN` (está no `server/.env`),
    o nome, o e-mail real e uma palavra-passe forte. Depois disto o setup fecha para sempre nesta base.
 
+4. **QR Code no telemóvel** (passo 7.4): o telemóvel tem de estar na mesma rede Wi-Fi que este PC.
+   O endereço usado pelo QR está em `web/.env.local` (`VITE_PUBLIC_URL`, ex.: `http://172.20.10.10:5173`);
+   se mudar de rede, atualize-o com o endereço «Network» que o `npm run dev` mostra e reinicie o frontend.
+   Se o telemóvel não abrir a página, o Firewall do Windows está a bloquear o Node: permita-o em «Redes privadas».
+
 > Se esquecer a palavra-passe do administrador geral do ensaio, na pasta `server` (PowerShell):
 > `$env:DB_NAME='sogester_ensaio'; npm run admin:reset-password`
 

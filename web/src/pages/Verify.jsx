@@ -56,13 +56,17 @@ export default function Verify() {
           </dl>
         </>
       )}
-      {getToken() && (
-        <p>
+      <p>
+        {getToken() ? (
           <Link className="button" to={`/portaria?codigo=${encodeURIComponent(code)}`}>
             Abrir na portaria
           </Link>
-        </p>
-      )}
+        ) : (
+          <Link className="button" to={`/login?voltar=${encodeURIComponent(`/portaria?codigo=${code}`)}`}>
+            Portaria: entrar para registar a saída
+          </Link>
+        )}
+      </p>
       <p className="muted small">
         <Link to="/login">Sogester</Link>
       </p>

@@ -3,6 +3,15 @@ const TOKEN_KEY = 'sogester.token'
 export const getToken = () => localStorage.getItem(TOKEN_KEY)
 export const setToken = (t) => (t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY))
 
+/**
+ * Endereço público da plataforma, usado no QR Code das autorizações.
+ * VITE_PUBLIC_URL (web/.env.local ou produção) tem prioridade; senão, o endereço por onde se abriu a página.
+ */
+export const publicOrigin = () => (import.meta.env.VITE_PUBLIC_URL || window.location.origin).replace(/\/+$/, '')
+
+/** true quando o QR Code levaria a um endereço que só existe neste computador (localhost). */
+export const isLocalOnly = () => /^https?:\/\/(localhost|127\.|\[::1\])/i.test(publicOrigin())
+
 export class ApiError extends Error {
   constructor(status, code, message, details) {
     super(message)

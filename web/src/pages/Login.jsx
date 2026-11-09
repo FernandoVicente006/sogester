@@ -20,7 +20,11 @@ export default function Login() {
       .catch(() => setCanInitialize(false))
   }, [])
 
-  if (user) return <Navigate to="/" replace />
+  // Destino depois de entrar (ex.: a portaria vinda do QR Code). Só caminhos internos.
+  const back = new URLSearchParams(window.location.search).get('voltar')
+  const target = back && back.startsWith('/') && !back.startsWith('//') ? back : '/'
+
+  if (user) return <Navigate to={target} replace />
 
   async function submit(e) {
     e.preventDefault()
@@ -28,7 +32,7 @@ export default function Login() {
     setError('')
     try {
       await login(email, password)
-      navigate('/')
+      navigate(target)
     } catch (err) {
       setError(errorText(err))
     } finally {
